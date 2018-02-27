@@ -1,96 +1,67 @@
-import NestHydrationJS from "nesthydrationjs";
-import joinMonster from "join-monster";
-import {GraphQLResolveInfo} from "graphql/type/definition";
-import {connectionFromArray} from "graphql-relay";
-import {GraphQLUrl} from "graphql-url";
-import {Args, FilterTypes, IField, ISchemaAdapter, ITable, SchemaFieldTypes, Value} from "../../Schema";
-import FBDatabase, {DBOptions} from "./FBDatabase";
-
-export type BlobLinkCreator = (id: IBlobID) => string;
-
-export interface IFBGraphQLContext {
-    query(query: string, params?: any[]): Promise<any[]>;
-
-    execute(query: string, params?: any[]): Promise<any[]>;
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
 }
-
-export interface ISchemaDetailOptions {
-    include?: string[];
-    exclude?: string[];
-    includePattern?: string;
-    excludePattern?: string;
-}
-
-export interface IAdapterOptions extends DBOptions, ISchemaDetailOptions {
-    blobLinkCreator: BlobLinkCreator;
-}
-
-export interface IBlobID {
-    table: string;
-    field: string;
-    primaryField: string;
-    primaryKey: string;
-}
-
-export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
-
-    protected _options: IAdapterOptions;
-
-    constructor(options: IAdapterOptions) {
+Object.defineProperty(exports, "__esModule", { value: true });
+const nesthydrationjs_1 = __importDefault(require("nesthydrationjs"));
+const join_monster_1 = __importDefault(require("join-monster"));
+const graphql_relay_1 = require("graphql-relay");
+const graphql_url_1 = require("graphql-url");
+const Schema_1 = require("../../Schema");
+const FBDatabase_1 = __importDefault(require("./FBDatabase"));
+class FBAdapter {
+    constructor(options) {
         this._options = options;
     }
-
-    private static _convertType(type: number): SchemaFieldTypes {
+    static _convertType(type) {
         switch (type) {
             case 261:
-                return SchemaFieldTypes.BLOB;
+                return Schema_1.SchemaFieldTypes.BLOB;
             case 7:
             case 8:
             case 16:
-                return SchemaFieldTypes.INT;
+                return Schema_1.SchemaFieldTypes.INT;
             case 10:
             case 11:
             case 27:
-                return SchemaFieldTypes.FLOAT;
+                return Schema_1.SchemaFieldTypes.FLOAT;
             case 12:
             case 13:
             case 35:
-                return SchemaFieldTypes.DATE;
+                return Schema_1.SchemaFieldTypes.DATE;
             case 14:
             case 37:
             case 40:
             default:
-                return SchemaFieldTypes.STRING;
+                return Schema_1.SchemaFieldTypes.STRING;
         }
     }
-
-    public quote(str: string): string {
+    quote(str) {
         return `"${str}"`;
     }
-
-    public async getTables(): Promise<ITable[]> {
-        const database = new FBDatabase();
+    async getTables() {
+        const database = new FBDatabase_1.default();
         try {
             await database.attach(this._options);
             return await this._queryToDatabase(database);
-        } finally {
+        }
+        finally {
             try {
                 await database.detach();
-            } catch (error) {
+            }
+            catch (error) {
                 console.log(error);
             }
         }
     }
-
-    public async resolve(source: any, args: Args, context: IFBGraphQLContext, info: GraphQLResolveInfo) {
+    async resolve(source, args, context, info) {
         if (source) {
             //resolve fields
             const field = source[info.fieldName];
-
             //resolve BLOB fields
-            if (info.returnType === GraphQLUrl && typeof field === "function") {
-                const {sqlTable, uniqueKey} = (info.parentType as any)._typeConfig;
-                const id: IBlobID = {
+            if (info.returnType === graphql_url_1.GraphQLUrl && typeof field === "function") {
+                const { sqlTable, uniqueKey } = info.parentType._typeConfig;
+                const id = {
                     table: sqlTable,
                     field: info.fieldName,
                     primaryField: uniqueKey,
@@ -98,65 +69,51 @@ export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
                 };
                 return this._options.blobLinkCreator(id);
             }
-
             // resolve connections
             if (Array.isArray(field)) {
-                return {
-                    total: field.length,
-                    ...connectionFromArray(field, args)
-                };
+                return Object.assign({ total: field.length }, graphql_relay_1.connectionFromArray(field, args));
             }
             return field;
         }
-
         // resolve root query
-        const result = await joinMonster(info, {}, (sql: string) => {
+        const result = await join_monster_1.default(info, {}, (sql) => {
             console.log(sql);
             return context.query(sql);
         });
-        return {
-            total: result.length,
-            ...connectionFromArray(result, args)
-        };
+        return Object.assign({ total: result.length }, graphql_relay_1.connectionFromArray(result, args));
     }
-
-    public createSQLCondition(filterType: FilterTypes, tableAlias: string, field: IField, value?: Value): string {
+    createSQLCondition(filterType, tableAlias, field, value) {
         let tableField = `${tableAlias}.${this.quote(field.name)}`;
-        if (field.type === SchemaFieldTypes.DATE) {
+        if (field.type === Schema_1.SchemaFieldTypes.DATE) {
             tableField = `CAST(${tableField} AS TIMESTAMP)`;
         }
         if (value) {
-            value = FBDatabase.escape(value);
+            value = FBDatabase_1.default.escape(value);
         }
         switch (filterType) {
-            case FilterTypes.IS_EMPTY:
+            case Schema_1.FilterTypes.IS_EMPTY:
                 return `${tableField} = ''`;
-            case FilterTypes.EQUALS:
+            case Schema_1.FilterTypes.EQUALS:
                 return `${tableField} = ${value}`;
-
-            case FilterTypes.CONTAINS:
+            case Schema_1.FilterTypes.CONTAINS:
                 return `${tableField} CONTAINING ${value}`;
-            case FilterTypes.BEGINS:
+            case Schema_1.FilterTypes.BEGINS:
                 return `${tableField} STARTING WITH ${value}`;
-            case FilterTypes.ENDS:
+            case Schema_1.FilterTypes.ENDS:
                 return `REVERSE(${tableField}) STARTING WITH ${value}`;
-
-            case FilterTypes.GREATER:
+            case Schema_1.FilterTypes.GREATER:
                 return `${tableField} > ${value}`;
-            case FilterTypes.LESS:
+            case Schema_1.FilterTypes.LESS:
                 return `${tableField} < ${value}`;
             default:
                 return "";
         }
     }
-
-    protected async _queryToDatabase(database: FBDatabase): Promise<ITable[]> {
-        const {include, exclude, includePattern, excludePattern} = this._options;
-
+    async _queryToDatabase(database) {
+        const { include, exclude, includePattern, excludePattern } = this._options;
         const includeEscaped = include ? include.map((item) => `'${item}'`) : [];
         const excludeEscaped = exclude ? exclude.map((item) => `'${item}'`) : [];
-
-        const result: any[] = await database.query(`
+        const result = await database.query(`
           SELECT
             TRIM(r.rdb$relation_name)                                   AS "tableName",
             TRIM(rlf.rdb$relation_name) 
@@ -205,23 +162,23 @@ export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
             
           ORDER BY r.rdb$relation_name
         `);
-
-        const definition: any = [{
-            id: {column: "tableName", id: true},
-            name: {column: "tableName"},
-            description: {column: "tableName"},
-            fields: [{
-                id: {column: "fieldKey", id: true},
-                name: "fieldName",
-                description: {column: "fieldName"},
-                primary: {column: "primaryFlag", type: "BOOLEAN", default: false},
-                type: {column: "fieldType", type: FBAdapter._convertType},
-                nonNull: {column: "nullFlag", type: "BOOLEAN", default: false},
-                tableNameRef: "relationName",
-                fieldNameRef: "relationFieldName"
-            }]
-        }];
-
-        return NestHydrationJS().nest(result, definition);
+        const definition = [{
+                id: { column: "tableName", id: true },
+                name: { column: "tableName" },
+                description: { column: "tableName" },
+                fields: [{
+                        id: { column: "fieldKey", id: true },
+                        name: "fieldName",
+                        description: { column: "fieldName" },
+                        primary: { column: "primaryFlag", type: "BOOLEAN", default: false },
+                        type: { column: "fieldType", type: FBAdapter._convertType },
+                        nonNull: { column: "nullFlag", type: "BOOLEAN", default: false },
+                        tableNameRef: "relationName",
+                        fieldNameRef: "relationFieldName"
+                    }]
+            }];
+        return nesthydrationjs_1.default().nest(result, definition);
     }
 }
+exports.default = FBAdapter;
+//# sourceMappingURL=FBAdapter.js.map

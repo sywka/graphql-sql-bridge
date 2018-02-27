@@ -1,7 +1,7 @@
 import path from "path";
 import firebird from "node-firebird";
 
-type BlobField = (callback: (err: Error, name: string, event: IBlobEventEmitter) => void) => void;
+export type BlobField = (callback: (err: Error, name: string, event: IBlobEventEmitter) => void) => void;
 
 export type DBOptions = firebird.Options;
 
@@ -9,7 +9,7 @@ export interface IBlobEventEmitter extends NodeJS.EventEmitter {
     pipe(destination: NodeJS.WritableStream): void;
 }
 
-abstract class Base<Source extends (firebird.Database | firebird.Transaction)> {
+export abstract class FBase<Source extends (firebird.Database | firebird.Transaction)> {
 
     protected _source: Source;
 
@@ -27,7 +27,7 @@ abstract class Base<Source extends (firebird.Database | firebird.Transaction)> {
     }
 
     public static async blobToBuffer(blob: BlobField): Promise<Buffer> {
-        const blobStream = await Base.blobToStream(blob);
+        const blobStream = await FBase.blobToStream(blob);
 
         return new Promise<Buffer>((resolve, reject) => {
             let chunks = [], length = 0;
@@ -60,7 +60,7 @@ abstract class Base<Source extends (firebird.Database | firebird.Transaction)> {
     }
 }
 
-export class FBTransaction extends Base<firebird.Transaction> {
+export class FBTransaction extends FBase<firebird.Transaction> {
 
     public isInTransaction(): boolean {
         return Boolean(this._source);
@@ -88,7 +88,7 @@ export class FBTransaction extends Base<firebird.Transaction> {
     }
 }
 
-export default class FBDatabase extends Base<firebird.Database> {
+export default class FBDatabase extends FBase<firebird.Database> {
 
     constructor();
     constructor(source: firebird.Database);

@@ -3,7 +3,7 @@
 /install/bin
 
 # Generated files
-*.js
+#*.js
 *.js.map
 
 *.FDB

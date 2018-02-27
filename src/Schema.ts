@@ -18,7 +18,7 @@ import {GraphQLFieldConfigMap, GraphQLInputFieldConfigMap, GraphQLResolveInfo} f
 import {connectionArgs, connectionDefinitions, GraphQLConnectionDefinitions} from "graphql-relay";
 import Progress from "./Progress";
 
-type ID = number | string;
+export type ID = number | string;
 
 export interface IBase {
     readonly id: ID;

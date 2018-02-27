@@ -11,7 +11,7 @@ import Schema, {
     Value
 } from "./Schema";
 import FBDatabase, {DBOptions, FBConnectionPool, FBTransaction, IBlobEventEmitter} from "./adapter/fb/FBDatabase";
-import FirebirdAdapter, {
+import FBAdapter, {
     BlobLinkCreator,
     IAdapterOptions,
     IBlobID,
@@ -27,7 +27,7 @@ export {
 
     FBDatabase, FBConnectionPool, DBOptions, IBlobEventEmitter, FBTransaction,
 
-    FirebirdAdapter, ISchemaDetailOptions, IAdapterOptions, IBlobID, BlobLinkCreator, IFBGraphQLContext,
+    FBAdapter, ISchemaDetailOptions, IAdapterOptions, IBlobID, BlobLinkCreator, IFBGraphQLContext,
 
     FBGraphQLContext,
 

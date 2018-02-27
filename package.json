@@ -1,6 +1,8 @@
 {
   "name": "graphql-sql-bridge",
   "version": "0.0.1",
+  "main": "./dist/src/index.js",
+  "types": "./types.d.ts",
   "scripts": {
     "devServer": "yarn run build&&node ./bin/www.js",
     "build": "tsc"
@@ -17,6 +19,7 @@
     "join-monster": "^2.0.16",
     "nesthydrationjs": "^1.0.3",
     "node-firebird": "^0.8.4",
+    "path": "^0.12.7",
     "progress": "^2.0.0",
     "promise-queue": "^2.2.5"
   },
@@ -26,8 +29,11 @@
     "@types/graphql": "^0.12.4",
     "@types/graphql-date": "^1.0.2",
     "@types/graphql-relay": "^0.4.4",
+    "@types/hapi": "^17.0.3",
+    "@types/koa": "^2.0.44",
     "@types/progress": "^2.0.1",
     "@types/promise-queue": "^2.2.0",
     "typescript": "^2.7.2"
-  }
+  },
+  "author": "Lomashko Yuri"
 }
