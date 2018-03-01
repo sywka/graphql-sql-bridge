@@ -15,5 +15,9 @@ export default abstract class BaseRouter<Options> {
         return this._router;
     }
 
+    get options(): Options {
+        return this._options;
+    }
+
     protected abstract routes(router: Router, options: Options);
 }

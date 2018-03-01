@@ -9,6 +9,14 @@ export interface IBlobEventEmitter extends NodeJS.EventEmitter {
     pipe(destination: NodeJS.WritableStream): void;
 }
 
+export enum IsolationTypes {
+    ISOLATION_READ_COMMITED_READ_ONLY,
+    ISOLATION_SERIALIZABLE,
+    ISOLATION_REPEATABLE_READ,
+    ISOLATION_READ_COMMITED,
+    ISOLATION_READ_UNCOMMITTED
+}
+
 export abstract class FBase<Source extends (firebird.Database | firebird.Transaction)> {
 
     protected _source: Source;
@@ -144,10 +152,10 @@ export default class FBDatabase extends FBase<firebird.Database> {
         });
     }
 
-    public async transaction(isolation?: firebird.Isolation): Promise<FBTransaction> {
+    public async transaction(isolation?: IsolationTypes): Promise<FBTransaction> {
         if (!this._source) throw new Error("Database need created");
         return new Promise<FBTransaction>((resolve, reject) => {
-            this._source.transaction(isolation, (err, transaction) => {
+            this._source.transaction(firebird[IsolationTypes[isolation]], (err, transaction) => {
                 err ? reject(err) : resolve(new FBTransaction(transaction));
             });
         });

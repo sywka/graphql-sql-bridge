@@ -5,6 +5,13 @@ export declare type DBOptions = firebird.Options;
 export interface IBlobEventEmitter extends NodeJS.EventEmitter {
     pipe(destination: NodeJS.WritableStream): void;
 }
+export declare enum IsolationTypes {
+    ISOLATION_READ_COMMITED_READ_ONLY = 0,
+    ISOLATION_SERIALIZABLE = 1,
+    ISOLATION_REPEATABLE_READ = 2,
+    ISOLATION_READ_COMMITED = 3,
+    ISOLATION_READ_UNCOMMITTED = 4,
+}
 export declare abstract class FBase<Source extends (firebird.Database | firebird.Transaction)> {
     protected _source: Source;
     protected constructor(source: Source);
@@ -27,7 +34,7 @@ export default class FBDatabase extends FBase<firebird.Database> {
     attachOrCreate(options: DBOptions): Promise<void>;
     attach(options: DBOptions): Promise<void>;
     detach(): Promise<void>;
-    transaction(isolation?: firebird.Isolation): Promise<FBTransaction>;
+    transaction(isolation?: IsolationTypes): Promise<FBTransaction>;
     sequentially(query: string, params: any[], rowCallback: firebird.SequentialCallback): Promise<void>;
 }
 export declare class FBConnectionPool {

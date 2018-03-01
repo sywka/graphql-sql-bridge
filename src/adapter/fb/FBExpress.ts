@@ -1,4 +1,4 @@
-import {NextFunction, Request, Response, Router} from "express";
+import {NextFunction, Request, RequestHandler, Response, Router} from "express";
 import graphqlHTTP from "express-graphql";
 import FBAdapter, {IBlobID, ISchemaDetailOptions} from "./FBAdapter";
 import FBDatabase, {DBOptions, FBConnectionPool} from "./FBDatabase";
@@ -24,18 +24,18 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
 
         this._connectionPool = new FBConnectionPool();
         this._connectionPool.createConnectionPool(options, options.maxConnectionPool);
-        this._schema = this._createSchema(options);
+
+        this._schema = this._getSchema(options);
+        this._schema.createSchema().catch(console.error);
     }
 
-    protected _createSchema(options: FBExpressOptions): Schema<FBGraphQLContext> {
-        const schema = new Schema({
+    protected _getSchema(options: FBExpressOptions): Schema<FBGraphQLContext> {
+        return new Schema({
             adapter: new FBAdapter({
                 ...(options as DBOptions),
                 blobLinkCreator: this._createBlobUrl.bind(this),
             })
         });
-        schema.createSchema().catch(console.error);
-        return schema;
     }
 
     protected _createBlobUrl(id: IBlobID) {
@@ -43,41 +43,43 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
         return `${this._routerUrl}${FBExpress.BLOBS_PATH}?id=${idParam}`;
     }
 
-    protected routes(router: Router, options: FBExpressOptions) {
-        router.use("/", (req: Request, res: Response, next: NextFunction) => {
-            this._routerUrl = req.protocol + "://" + req.get("host") + req.baseUrl;
-            next();
-        });
+    protected _routeUrlMiddleware(req: Request, res: Response, next: NextFunction): void {
+        this._routerUrl = req.protocol + "://" + req.get("host") + req.baseUrl;
+        next();
+    }
 
-        router.use(FBExpress.BLOBS_PATH, (req: Request, res: Response, next: NextFunction): void => {
-            req.query = JSON.parse(new Buffer(req.query.id, "base64").toString());
-            next();
-        });
-        router.use(FBExpress.BLOBS_PATH, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-            let database;
-            try {
-                database = await this._connectionPool.attach();
+    protected _parseBlobIDMiddleware(req: Request, res: Response, next: NextFunction): void {
+        req.query = JSON.parse(new Buffer(req.query.id, "base64").toString());
+        next();
+    }
 
-                const result = await database.query(`
+    protected async _queryBlobMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
+        let database;
+        try {
+            database = await this._connectionPool.attach();
+
+            const result = await database.query(`
                     SELECT ${req.query.field} AS "binaryField"
                     FROM ${req.query.table}
                     WHERE ${req.query.primaryField} = ${req.query.primaryKey} 
                 `);
-                const blobStream = await FBDatabase.blobToStream(result[0].binaryField);
-                blobStream.pipe(res);
+            const blobStream = await FBDatabase.blobToStream(result[0].binaryField);
+            blobStream.pipe(res);
+            await new Promise(resolve => blobStream.on("end", resolve));
 
+        } catch (error) {
+            next(error);
+        } finally {
+            try {
+                await database.detach();
             } catch (error) {
-                next(error);
-            } finally {
-                try {
-                    await database.detach();
-                } catch (error) {
-                    console.log(error);
-                }
+                console.log(error);
             }
-        });
+        }
+    }
 
-        router.use("/", graphqlHTTP(async () => {
+    protected _getGraphQLMiddleware(options: FBExpressOptions): RequestHandler {
+        return graphqlHTTP(async () => {
             if (!this._schema || !this._schema.schema) throw new Error("Temporarily unavailable");
 
             const startTime = Date.now();
@@ -92,6 +94,17 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
                     return {runTime: (Date.now() - startTime) + " мсек"};
                 }
             };
-        }));
+        });
+    }
+
+    protected routes(router: Router, options: FBExpressOptions) {
+        router.use("/", this._routeUrlMiddleware.bind(this));
+
+        router.use(FBExpress.BLOBS_PATH, [
+            this._parseBlobIDMiddleware.bind(this),
+            this._queryBlobMiddleware.bind(this)
+        ]);
+
+        router.use("/", this._getGraphQLMiddleware(options));
     }
 }

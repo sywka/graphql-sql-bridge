@@ -10,6 +10,9 @@ class BaseRouter {
     get router() {
         return this._router;
     }
+    get options() {
+        return this._options;
+    }
 }
 exports.default = BaseRouter;
 //# sourceMappingURL=BaseRouter.js.map

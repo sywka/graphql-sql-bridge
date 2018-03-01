@@ -1,5 +1,5 @@
 /// <reference types="express" />
-import { Router } from "express";
+import { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import { IBlobID, ISchemaDetailOptions } from "./FBAdapter";
 import { DBOptions, FBConnectionPool } from "./FBDatabase";
 import FBGraphQLContext from "./FBGraphQLContext";
@@ -15,7 +15,11 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
     protected _connectionPool: FBConnectionPool;
     protected _schema: Schema<FBGraphQLContext>;
     constructor(options: FBExpressOptions);
-    protected _createSchema(options: FBExpressOptions): Schema<FBGraphQLContext>;
+    protected _getSchema(options: FBExpressOptions): Schema<FBGraphQLContext>;
     protected _createBlobUrl(id: IBlobID): string;
+    protected _routeUrlMiddleware(req: Request, res: Response, next: NextFunction): void;
+    protected _parseBlobIDMiddleware(req: Request, res: Response, next: NextFunction): void;
+    protected _queryBlobMiddleware(req: Request, res: Response, next: NextFunction): Promise<void>;
+    protected _getGraphQLMiddleware(options: FBExpressOptions): RequestHandler;
     protected routes(router: Router, options: FBExpressOptions): void;
 }

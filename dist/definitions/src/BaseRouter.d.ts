@@ -5,5 +5,6 @@ export default abstract class BaseRouter<Options> {
     private readonly _router;
     protected constructor(options?: Options);
     readonly router: Router;
+    readonly options: Options;
     protected abstract routes(router: Router, options: Options): any;
 }

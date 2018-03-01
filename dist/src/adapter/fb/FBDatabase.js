@@ -5,6 +5,14 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const path_1 = __importDefault(require("path"));
 const node_firebird_1 = __importDefault(require("node-firebird"));
+var IsolationTypes;
+(function (IsolationTypes) {
+    IsolationTypes[IsolationTypes["ISOLATION_READ_COMMITED_READ_ONLY"] = 0] = "ISOLATION_READ_COMMITED_READ_ONLY";
+    IsolationTypes[IsolationTypes["ISOLATION_SERIALIZABLE"] = 1] = "ISOLATION_SERIALIZABLE";
+    IsolationTypes[IsolationTypes["ISOLATION_REPEATABLE_READ"] = 2] = "ISOLATION_REPEATABLE_READ";
+    IsolationTypes[IsolationTypes["ISOLATION_READ_COMMITED"] = 3] = "ISOLATION_READ_COMMITED";
+    IsolationTypes[IsolationTypes["ISOLATION_READ_UNCOMMITTED"] = 4] = "ISOLATION_READ_UNCOMMITTED";
+})(IsolationTypes = exports.IsolationTypes || (exports.IsolationTypes = {}));
 class FBase {
     constructor(source) {
         this._source = source;
@@ -133,7 +141,7 @@ class FBDatabase extends FBase {
         if (!this._source)
             throw new Error("Database need created");
         return new Promise((resolve, reject) => {
-            this._source.transaction(isolation, (err, transaction) => {
+            this._source.transaction(node_firebird_1.default[IsolationTypes[isolation]], (err, transaction) => {
                 err ? reject(err) : resolve(new FBTransaction(transaction));
             });
         });
