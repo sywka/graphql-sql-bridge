@@ -1,6 +1,6 @@
 {
   "name": "graphql-sql-bridge",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "main": "./dist/src/index.js",
   "types": "./types.d.ts",
   "scripts": {
