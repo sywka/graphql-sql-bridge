@@ -390,7 +390,7 @@ class Schema {
                             sqlColumn: field.name,
                             sqlJoin: (parentTable, joinTable) => (`${parentTable}.${this._options.adapter.quote(field.name)}` +
                                 ` = ${joinTable}.${this._options.adapter.quote(field.fieldNameRef)}`),
-                            where: (tableAlias, args, context) => (this._createSQLWhere(table, tableAlias, args.where, context)),
+                            where: (tableAlias, args, context) => (this._createSQLWhere(tableRef, tableAlias, args.where, context)),
                             orderBy: (args) => Schema._createObjectOrderBy(args.order)
                         };
                     }
