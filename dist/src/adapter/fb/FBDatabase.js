@@ -92,6 +92,34 @@ class FBDatabase extends FBase {
     constructor(source) {
         super(source);
     }
+    static async executeDatabase(source, callback) {
+        let database;
+        try {
+            if (source instanceof FBConnectionPool) {
+                database = await source.attach();
+            }
+            else {
+                database = new FBDatabase();
+                await database.attach(source);
+            }
+            return await callback(database);
+        }
+        finally {
+            if (database && database.isAttached()) {
+                try {
+                    await database.detach();
+                }
+                catch (error) {
+                    console.warn(error);
+                }
+            }
+        }
+    }
+    static async executeTransaction(source, callback, isolation) {
+        return await FBDatabase.executeDatabase(source, async (database) => {
+            return await database.executeTransaction(callback, isolation);
+        });
+    }
     static escape(value) {
         return node_firebird_1.default.escape(value);
     }
@@ -154,6 +182,26 @@ class FBDatabase extends FBase {
                 err ? reject(err) : resolve();
             });
         });
+    }
+    async executeTransaction(callback, isolation) {
+        let transaction;
+        try {
+            transaction = await this.transaction(isolation);
+            const result = await callback(transaction);
+            await transaction.commit();
+            return result;
+        }
+        catch (error) {
+            if (transaction && transaction.isInTransaction()) {
+                try {
+                    await transaction.rollback();
+                }
+                catch (error) {
+                    console.warn(error);
+                }
+            }
+            throw error;
+        }
     }
 }
 exports.default = FBDatabase;

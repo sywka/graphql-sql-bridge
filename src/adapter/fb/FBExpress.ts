@@ -1,7 +1,7 @@
 import {NextFunction, Request, RequestHandler, Response, Router} from "express";
 import graphqlHTTP from "express-graphql";
 import FBAdapter, {IBlobID, ISchemaDetailOptions} from "./FBAdapter";
-import FBDatabase, {DBOptions, FBConnectionPool} from "./FBDatabase";
+import FBDatabase, {DBOptions, FBConnectionPool, FBTransaction} from "./FBDatabase";
 import FBGraphQLContext from "./FBGraphQLContext";
 import Schema from "../../Schema";
 import BaseRouter from "../../BaseRouter";
@@ -16,23 +16,27 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
     public static BLOBS_PATH = "/blobs";
 
     protected _routerUrl: string = "";
-    protected _connectionPool: FBConnectionPool;
     protected _schema: Schema<FBGraphQLContext>;
+
+    private readonly _connectionPool = new FBConnectionPool();
 
     constructor(options: FBExpressOptions) {
         super(options);
 
-        this._connectionPool = new FBConnectionPool();
-        this._connectionPool.createConnectionPool(options, options.maxConnectionPool);
+        this.connectionPool.createConnectionPool(options, options.maxConnectionPool);
 
         this._schema = this._getSchema(options);
         this._schema.createSchema().catch(console.error);
     }
 
+    get connectionPool(): FBConnectionPool {
+        return this._connectionPool;
+    }
+
     protected _getSchema(options: FBExpressOptions): Schema<FBGraphQLContext> {
         return new Schema({
-            adapter: new FBAdapter({
-                ...(options as DBOptions),
+            adapter: new FBAdapter(this.connectionPool, {
+                ...<ISchemaDetailOptions>options,
                 blobLinkCreator: this._createBlobUrl.bind(this),
             })
         });
@@ -54,27 +58,20 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
     }
 
     protected async _queryBlobMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
-        let database;
         try {
-            database = await this._connectionPool.attach();
-
-            const result = await database.query(`
+            await FBDatabase.executeTransaction(this.connectionPool, async (transaction: FBTransaction) => {
+                const result = await transaction.query(`
                     SELECT ${req.query.field} AS "binaryField"
                     FROM ${req.query.table}
                     WHERE ${req.query.primaryField} = ${req.query.primaryKey} 
                 `);
-            const blobStream = await FBDatabase.blobToStream(result[0].binaryField);
-            blobStream.pipe(res);
-            await new Promise(resolve => blobStream.on("end", resolve));
 
+                const blobStream = await FBDatabase.blobToStream(result[0].binaryField);    //TODO fix lib
+                blobStream.pipe(res);
+                await new Promise(resolve => blobStream.on("end", resolve));
+            });
         } catch (error) {
             next(error);
-        } finally {
-            try {
-                await database.detach();
-            } catch (error) {
-                console.log(error);
-            }
         }
     }
 
@@ -83,7 +80,7 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
             if (!this._schema || !this._schema.schema) throw new Error("Temporarily unavailable");
 
             const startTime = Date.now();
-            const database = await this._connectionPool.attach();
+            const database = await this.connectionPool.attach();
 
             return {
                 schema: this._schema.schema,

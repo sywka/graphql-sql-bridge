@@ -12,9 +12,10 @@ export interface FBExpressOptions extends ISchemaDetailOptions, DBOptions {
 export default class FBExpress extends BaseRouter<FBExpressOptions> {
     static BLOBS_PATH: string;
     protected _routerUrl: string;
-    protected _connectionPool: FBConnectionPool;
     protected _schema: Schema<FBGraphQLContext>;
+    private readonly _connectionPool;
     constructor(options: FBExpressOptions);
+    readonly connectionPool: FBConnectionPool;
     protected _getSchema(options: FBExpressOptions): Schema<FBGraphQLContext>;
     protected _createBlobUrl(id: IBlobID): string;
     protected _routeUrlMiddleware(req: Request, res: Response, next: NextFunction): void;

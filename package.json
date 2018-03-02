@@ -29,8 +29,6 @@
     "@types/graphql": "^0.12.4",
     "@types/graphql-date": "^1.0.2",
     "@types/graphql-relay": "^0.4.4",
-    "@types/hapi": "^17.0.3",
-    "@types/koa": "^2.0.44",
     "@types/progress": "^2.0.1",
     "@types/promise-queue": "^2.2.0",
     "typescript": "^2.7.2"

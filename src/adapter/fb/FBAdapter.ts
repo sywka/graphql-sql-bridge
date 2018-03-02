@@ -4,7 +4,7 @@ import {GraphQLResolveInfo} from "graphql/type/definition";
 import {connectionFromArray} from "graphql-relay";
 import {GraphQLUrl} from "graphql-url";
 import {Args, FilterTypes, IField, ISchemaAdapter, ITable, SchemaFieldTypes, Value} from "../../Schema";
-import FBDatabase, {DBOptions} from "./FBDatabase";
+import FBDatabase, {DBOptions, FBConnectionPool} from "./FBDatabase";
 
 export type BlobLinkCreator = (id: IBlobID) => string;
 
@@ -21,7 +21,7 @@ export interface ISchemaDetailOptions {
     excludePattern?: string;
 }
 
-export interface IAdapterOptions extends DBOptions, ISchemaDetailOptions {
+export interface IAdapterOptions extends ISchemaDetailOptions {
     blobLinkCreator: BlobLinkCreator;
 }
 
@@ -35,9 +35,17 @@ export interface IBlobID {
 export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
 
     protected _options: IAdapterOptions;
+    private readonly _source: DBOptions | FBConnectionPool;
 
-    constructor(options: IAdapterOptions) {
+    constructor(dbOptions: DBOptions, options: IAdapterOptions);
+    constructor(pool: FBConnectionPool, options: IAdapterOptions);
+    constructor(source: any, options: IAdapterOptions) {
+        this._source = source;
         this._options = options;
+    }
+
+    get source(): DBOptions | FBConnectionPool {
+        return this._source;
     }
 
     private static _convertType(type: number): SchemaFieldTypes {
@@ -69,17 +77,80 @@ export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
     }
 
     public async getTables(): Promise<ITable[]> {
-        const database = new FBDatabase();
-        try {
-            await database.attach(this._options);
-            return await this._queryToDatabase(database);
-        } finally {
-            try {
-                await database.detach();
-            } catch (error) {
-                console.log(error);
-            }
-        }
+        return await FBDatabase.executeDatabase<ITable[]>(<DBOptions>this.source, async (database: FBDatabase) => {
+            const {include, exclude, includePattern, excludePattern} = this._options;
+
+            const includeEscaped = include ? include.map((item) => `'${item}'`) : [];
+            const excludeEscaped = exclude ? exclude.map((item) => `'${item}'`) : [];
+
+            const result: any[] = await database.query(`
+              SELECT
+                TRIM(r.rdb$relation_name)                                   AS "tableName",
+                TRIM(rlf.rdb$relation_name) 
+                  || '_' || TRIM(rlf.rdb$field_name)                        AS "fieldKey",
+                TRIM(rlf.rdb$field_name)                                    AS "fieldName",
+                f.rdb$field_type                                            AS "fieldType",
+                IIF(constPrim.rdb$constraint_type = 'PRIMARY KEY', 1, null) AS "primaryFlag",
+                f.rdb$null_flag                                             AS "nullFlag",
+                TRIM(ref_rel_const.rdb$relation_name)                       AS "relationName",
+                TRIM(seg.rdb$field_name)                                    AS "relationFieldName"
+                
+              FROM rdb$relations r
+              
+                LEFT JOIN rdb$relation_fields rlf ON rlf.rdb$relation_name = r.rdb$relation_name
+                  LEFT JOIN rdb$fields f ON f.rdb$field_name = rlf.rdb$field_source
+                  LEFT JOIN rdb$relation_constraints constPrim
+                    ON constPrim.rdb$relation_name = rlf.rdb$relation_name
+                    AND constPrim.rdb$constraint_type = 'PRIMARY KEY'
+                    AND EXISTS(
+                      SELECT *
+                      FROM rdb$index_segments i
+                      WHERE i.rdb$field_name = rlf.rdb$field_name
+                        AND i.rdb$index_name = constPrim.rdb$index_name
+                    )
+                  LEFT JOIN rdb$relation_constraints const
+                    ON const.rdb$relation_name = rlf.rdb$relation_name
+                    AND const.rdb$constraint_type = 'FOREIGN KEY'
+                    AND EXISTS(
+                      SELECT *
+                      FROM rdb$index_segments i
+                      WHERE i.rdb$field_name = rlf.rdb$field_name
+                        AND i.rdb$index_name = const.rdb$index_name
+                    )
+                    LEFT JOIN rdb$ref_constraints ref_ref_const
+                      ON ref_ref_const.rdb$constraint_name = const.rdb$constraint_name
+                      LEFT JOIN rdb$relation_constraints ref_rel_const
+                        ON ref_rel_const.rdb$constraint_name = ref_ref_const.rdb$const_name_uq
+                        LEFT JOIN rdb$index_segments seg ON seg.rdb$index_name = ref_rel_const.rdb$index_name  
+                             
+              WHERE r.rdb$view_blr IS NULL
+                AND (r.rdb$system_flag IS NULL OR r.rdb$system_flag = 0)
+                ${includeEscaped.length ? `AND r.rdb$relation_name IN (${includeEscaped.join(", ")})` : ""}
+                ${excludeEscaped.length ? `AND r.rdb$relation_name NOT IN (${excludeEscaped.join(", ")})` : ""}
+                ${includePattern ? `AND r.rdb$relation_name SIMILAR TO '${includePattern}'` : ""}
+                ${excludePattern ? `AND r.rdb$relation_name NOT SIMILAR TO '${excludePattern}'` : ""}
+                
+              ORDER BY r.rdb$relation_name
+            `);
+
+            const definition: any = [{
+                id: {column: "tableName", id: true},
+                name: {column: "tableName"},
+                description: {column: "tableName"},
+                fields: [{
+                    id: {column: "fieldKey", id: true},
+                    name: "fieldName",
+                    description: {column: "fieldName"},
+                    primary: {column: "primaryFlag", type: "BOOLEAN", default: false},
+                    type: {column: "fieldType", type: FBAdapter._convertType},
+                    nonNull: {column: "nullFlag", type: "BOOLEAN", default: false},
+                    tableNameRef: "relationName",
+                    fieldNameRef: "relationFieldName"
+                }]
+            }];
+
+            return NestHydrationJS().nest(result, definition);
+        });
     }
 
     public async resolve(source: any, args: Args, context: IFBGraphQLContext, info: GraphQLResolveInfo) {
@@ -89,7 +160,7 @@ export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
 
             //resolve BLOB fields
             if (info.returnType === GraphQLUrl && typeof field === "function") {
-                const {sqlTable, uniqueKey} = (info.parentType as any)._typeConfig;
+                const {sqlTable, uniqueKey} = (<any>info.parentType)._typeConfig;
                 const id: IBlobID = {
                     table: sqlTable,
                     field: info.fieldName,
@@ -148,80 +219,5 @@ export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
             default:
                 return "";
         }
-    }
-
-    protected async _queryToDatabase(database: FBDatabase): Promise<ITable[]> {
-        const {include, exclude, includePattern, excludePattern} = this._options;
-
-        const includeEscaped = include ? include.map((item) => `'${item}'`) : [];
-        const excludeEscaped = exclude ? exclude.map((item) => `'${item}'`) : [];
-
-        const result: any[] = await database.query(`
-          SELECT
-            TRIM(r.rdb$relation_name)                                   AS "tableName",
-            TRIM(rlf.rdb$relation_name) 
-              || '_' || TRIM(rlf.rdb$field_name)                        AS "fieldKey",
-            TRIM(rlf.rdb$field_name)                                    AS "fieldName",
-            f.rdb$field_type                                            AS "fieldType",
-            IIF(constPrim.rdb$constraint_type = 'PRIMARY KEY', 1, null) AS "primaryFlag",
-            f.rdb$null_flag                                             AS "nullFlag",
-            TRIM(ref_rel_const.rdb$relation_name)                       AS "relationName",
-            TRIM(seg.rdb$field_name)                                    AS "relationFieldName"
-            
-          FROM rdb$relations r
-          
-            LEFT JOIN rdb$relation_fields rlf ON rlf.rdb$relation_name = r.rdb$relation_name
-              LEFT JOIN rdb$fields f ON f.rdb$field_name = rlf.rdb$field_source
-              LEFT JOIN rdb$relation_constraints constPrim
-                ON constPrim.rdb$relation_name = rlf.rdb$relation_name
-                AND constPrim.rdb$constraint_type = 'PRIMARY KEY'
-                AND EXISTS(
-                  SELECT *
-                  FROM rdb$index_segments i
-                  WHERE i.rdb$field_name = rlf.rdb$field_name
-                    AND i.rdb$index_name = constPrim.rdb$index_name
-                )
-              LEFT JOIN rdb$relation_constraints const
-                ON const.rdb$relation_name = rlf.rdb$relation_name
-                AND const.rdb$constraint_type = 'FOREIGN KEY'
-                AND EXISTS(
-                  SELECT *
-                  FROM rdb$index_segments i
-                  WHERE i.rdb$field_name = rlf.rdb$field_name
-                    AND i.rdb$index_name = const.rdb$index_name
-                )
-                LEFT JOIN rdb$ref_constraints ref_ref_const
-                  ON ref_ref_const.rdb$constraint_name = const.rdb$constraint_name
-                  LEFT JOIN rdb$relation_constraints ref_rel_const
-                    ON ref_rel_const.rdb$constraint_name = ref_ref_const.rdb$const_name_uq
-                    LEFT JOIN rdb$index_segments seg ON seg.rdb$index_name = ref_rel_const.rdb$index_name  
-                         
-          WHERE r.rdb$view_blr IS NULL
-            AND (r.rdb$system_flag IS NULL OR r.rdb$system_flag = 0)
-            ${includeEscaped.length ? `AND r.rdb$relation_name IN (${includeEscaped.join(", ")})` : ""}
-            ${excludeEscaped.length ? `AND r.rdb$relation_name NOT IN (${excludeEscaped.join(", ")})` : ""}
-            ${includePattern ? `AND r.rdb$relation_name SIMILAR TO '${includePattern}'` : ""}
-            ${excludePattern ? `AND r.rdb$relation_name NOT SIMILAR TO '${excludePattern}'` : ""}
-            
-          ORDER BY r.rdb$relation_name
-        `);
-
-        const definition: any = [{
-            id: {column: "tableName", id: true},
-            name: {column: "tableName"},
-            description: {column: "tableName"},
-            fields: [{
-                id: {column: "fieldKey", id: true},
-                name: "fieldName",
-                description: {column: "fieldName"},
-                primary: {column: "primaryFlag", type: "BOOLEAN", default: false},
-                type: {column: "fieldType", type: FBAdapter._convertType},
-                nonNull: {column: "nullFlag", type: "BOOLEAN", default: false},
-                tableNameRef: "relationName",
-                fieldNameRef: "relationFieldName"
-            }]
-        }];
-
-        return NestHydrationJS().nest(result, definition);
     }
 }

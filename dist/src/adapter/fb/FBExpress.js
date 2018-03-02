@@ -14,13 +14,16 @@ class FBExpress extends BaseRouter_1.default {
         super(options);
         this._routerUrl = "";
         this._connectionPool = new FBDatabase_1.FBConnectionPool();
-        this._connectionPool.createConnectionPool(options, options.maxConnectionPool);
+        this.connectionPool.createConnectionPool(options, options.maxConnectionPool);
         this._schema = this._getSchema(options);
         this._schema.createSchema().catch(console.error);
     }
+    get connectionPool() {
+        return this._connectionPool;
+    }
     _getSchema(options) {
         return new Schema_1.default({
-            adapter: new FBAdapter_1.default(Object.assign({}, options, { blobLinkCreator: this._createBlobUrl.bind(this) }))
+            adapter: new FBAdapter_1.default(this.connectionPool, Object.assign({}, options, { blobLinkCreator: this._createBlobUrl.bind(this) }))
         });
     }
     _createBlobUrl(id) {
@@ -36,28 +39,20 @@ class FBExpress extends BaseRouter_1.default {
         next();
     }
     async _queryBlobMiddleware(req, res, next) {
-        let database;
         try {
-            database = await this._connectionPool.attach();
-            const result = await database.query(`
+            await FBDatabase_1.default.executeTransaction(this.connectionPool, async (transaction) => {
+                const result = await transaction.query(`
                     SELECT ${req.query.field} AS "binaryField"
                     FROM ${req.query.table}
                     WHERE ${req.query.primaryField} = ${req.query.primaryKey} 
                 `);
-            const blobStream = await FBDatabase_1.default.blobToStream(result[0].binaryField);
-            blobStream.pipe(res);
-            await new Promise(resolve => blobStream.on("end", resolve));
+                const blobStream = await FBDatabase_1.default.blobToStream(result[0].binaryField); //TODO fix lib
+                blobStream.pipe(res);
+                await new Promise(resolve => blobStream.on("end", resolve));
+            });
         }
         catch (error) {
             next(error);
-        }
-        finally {
-            try {
-                await database.detach();
-            }
-            catch (error) {
-                console.log(error);
-            }
         }
     }
     _getGraphQLMiddleware(options) {
@@ -65,7 +60,7 @@ class FBExpress extends BaseRouter_1.default {
             if (!this._schema || !this._schema.schema)
                 throw new Error("Temporarily unavailable");
             const startTime = Date.now();
-            const database = await this._connectionPool.attach();
+            const database = await this.connectionPool.attach();
             return {
                 schema: this._schema.schema,
                 graphiql: options.graphiql,

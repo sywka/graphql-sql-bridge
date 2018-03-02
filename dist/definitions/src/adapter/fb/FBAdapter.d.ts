@@ -1,6 +1,6 @@
 import { GraphQLResolveInfo } from "graphql/type/definition";
 import { Args, FilterTypes, IField, ISchemaAdapter, ITable, Value } from "../../Schema";
-import FBDatabase, { DBOptions } from "./FBDatabase";
+import { DBOptions, FBConnectionPool } from "./FBDatabase";
 export declare type BlobLinkCreator = (id: IBlobID) => string;
 export interface IFBGraphQLContext {
     query(query: string, params?: any[]): Promise<any[]>;
@@ -12,7 +12,7 @@ export interface ISchemaDetailOptions {
     includePattern?: string;
     excludePattern?: string;
 }
-export interface IAdapterOptions extends DBOptions, ISchemaDetailOptions {
+export interface IAdapterOptions extends ISchemaDetailOptions {
     blobLinkCreator: BlobLinkCreator;
 }
 export interface IBlobID {
@@ -23,11 +23,13 @@ export interface IBlobID {
 }
 export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
     protected _options: IAdapterOptions;
-    constructor(options: IAdapterOptions);
+    private readonly _source;
+    constructor(dbOptions: DBOptions, options: IAdapterOptions);
+    constructor(pool: FBConnectionPool, options: IAdapterOptions);
+    readonly source: DBOptions | FBConnectionPool;
     private static _convertType(type);
     quote(str: string): string;
     getTables(): Promise<ITable[]>;
     resolve(source: any, args: Args, context: IFBGraphQLContext, info: GraphQLResolveInfo): Promise<any>;
     createSQLCondition(filterType: FilterTypes, tableAlias: string, field: IField, value?: Value): string;
-    protected _queryToDatabase(database: FBDatabase): Promise<ITable[]>;
 }

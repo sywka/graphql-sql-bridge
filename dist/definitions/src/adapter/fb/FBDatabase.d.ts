@@ -5,6 +5,7 @@ export declare type DBOptions = firebird.Options;
 export interface IBlobEventEmitter extends NodeJS.EventEmitter {
     pipe(destination: NodeJS.WritableStream): void;
 }
+export declare type Executor<Subject, Result> = ((subject: Subject) => Result) | ((subject: Subject) => Promise<Result>);
 export declare enum IsolationTypes {
     ISOLATION_READ_COMMITED_READ_ONLY = 0,
     ISOLATION_SERIALIZABLE = 1,
@@ -28,6 +29,10 @@ export declare class FBTransaction extends FBase<firebird.Transaction> {
 export default class FBDatabase extends FBase<firebird.Database> {
     constructor();
     constructor(source: firebird.Database);
+    static executeDatabase<T>(options: DBOptions, callback: Executor<FBDatabase, T>): Promise<T>;
+    static executeDatabase<T>(pool: FBConnectionPool, callback: Executor<FBDatabase, T>): Promise<T>;
+    static executeTransaction<T>(options: DBOptions, callback: Executor<FBTransaction, T>, isolation?: IsolationTypes): Promise<T>;
+    static executeTransaction<T>(pool: FBConnectionPool, callback: Executor<FBTransaction, T>, isolation?: IsolationTypes): Promise<T>;
     static escape(value: any): string;
     static bindOptions(options: DBOptions): DBOptions;
     isAttached(): boolean;
@@ -36,6 +41,7 @@ export default class FBDatabase extends FBase<firebird.Database> {
     detach(): Promise<void>;
     transaction(isolation?: IsolationTypes): Promise<FBTransaction>;
     sequentially(query: string, params: any[], rowCallback: firebird.SequentialCallback): Promise<void>;
+    executeTransaction<T>(callback: Executor<FBTransaction, T>, isolation?: IsolationTypes): Promise<T>;
 }
 export declare class FBConnectionPool {
     static DEFAULT_MAX_POOL: number;

@@ -181,7 +181,7 @@ export default class Schema<GraphQLContext> {
         if (!where) return "";
 
         let groupsConditions = Object.keys(where).reduce((groupsConditions, filterName: FilterTypes) => {
-            switch (filterName as any) {
+            switch (<any>filterName) {
                 case "not":
                 case "or":
                 case "and":

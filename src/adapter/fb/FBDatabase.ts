@@ -9,6 +9,8 @@ export interface IBlobEventEmitter extends NodeJS.EventEmitter {
     pipe(destination: NodeJS.WritableStream): void;
 }
 
+export type Executor<Subject, Result> = ((subject: Subject) => Result) | ((subject: Subject) => Promise<Result>);
+
 export enum IsolationTypes {
     ISOLATION_READ_COMMITED_READ_ONLY,
     ISOLATION_SERIALIZABLE,
@@ -104,6 +106,37 @@ export default class FBDatabase extends FBase<firebird.Database> {
         super(source);
     }
 
+    public static async executeDatabase<T>(options: DBOptions, callback: Executor<FBDatabase, T>): Promise<T>;
+    public static async executeDatabase<T>(pool: FBConnectionPool, callback: Executor<FBDatabase, T>): Promise<T>;
+    public static async executeDatabase<T>(source: any, callback: Executor<FBDatabase, T>): Promise<T> {
+        let database: FBDatabase;
+        try {
+            if (source instanceof FBConnectionPool) {
+                database = await source.attach();
+            } else {
+                database = new FBDatabase();
+                await database.attach(source);
+            }
+            return await callback(database);
+        } finally {
+            if (database && database.isAttached()) {
+                try {
+                    await database.detach();
+                } catch (error) {
+                    console.warn(error);
+                }
+            }
+        }
+    }
+
+    public static async executeTransaction<T>(options: DBOptions, callback: Executor<FBTransaction, T>, isolation?: IsolationTypes): Promise<T>;
+    public static async executeTransaction<T>(pool: FBConnectionPool, callback: Executor<FBTransaction, T>, isolation?: IsolationTypes): Promise<T>;
+    public static async executeTransaction<T>(source: any, callback: Executor<FBTransaction, T>, isolation?: IsolationTypes): Promise<T> {
+        return await FBDatabase.executeDatabase<T>(source, async (database: FBDatabase) => {
+            return await database.executeTransaction<T>(callback, isolation);
+        });
+    }
+
     public static escape(value: any): string {
         return firebird.escape(value);
     }
@@ -168,6 +201,25 @@ export default class FBDatabase extends FBase<firebird.Database> {
                 err ? reject(err) : resolve();
             });
         });
+    }
+
+    public async executeTransaction<T>(callback: Executor<FBTransaction, T>, isolation?: IsolationTypes): Promise<T> {
+        let transaction: FBTransaction;
+        try {
+            transaction = await this.transaction(isolation);
+            const result = await callback(transaction);
+            await transaction.commit();
+            return result;
+        } catch (error) {
+            if (transaction && transaction.isInTransaction()) {
+                try {
+                    await transaction.rollback();
+                } catch (error) {
+                    console.warn(error);
+                }
+            }
+            throw error;
+        }
     }
 }
 
