@@ -4,7 +4,7 @@
   "main": "./dist/src/index.js",
   "types": "./types.d.ts",
   "scripts": {
-    "devServer": "yarn run build&&node ./bin/www.js",
+    "devServer": "yarn run build&&node ./dist/bin/start.js",
     "build": "tsc"
   },
   "dependencies": {
