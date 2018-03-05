@@ -58,6 +58,16 @@ class Schema {
     static _findOriginalField(table, escapedFieldName) {
         return table.fields.find((field) => Schema._escapeName(table.fields, field.name) === escapedFieldName);
     }
+    static _findTableRef(context, field) {
+        if (field.tableRefKey === undefined || field.tableRefKey === null)
+            return null;
+        return context.tables.find((tableRef) => tableRef.id === field.tableRefKey);
+    }
+    static _findFieldRef(tableRef, field) {
+        if (!tableRef || field.fieldRefKey === undefined || field.fieldRefKey === null)
+            return null;
+        return tableRef.fields.find((fieldRef) => fieldRef.id === field.fieldRefKey);
+    }
     static _createObjectOrderBy(order) {
         if (!order)
             return null;
@@ -375,25 +385,24 @@ class Schema {
     }
     _createTypeLinkFields(context, table, fields) {
         return fields.reduce((resultFields, field) => {
-            if (field.tableNameRef) {
-                const tableRef = context.tables.find((table) => (table.name === Schema._escapeName(context.tables, field.tableNameRef)));
-                if (tableRef) {
-                    const fieldName = Schema._escapeName(fields, `link_${field.name}`);
-                    const fieldType = this._createType(context, tableRef);
-                    const connectFieldType = this._createConnectionType(context, fieldType);
-                    if (fieldType) {
-                        resultFields[fieldName] = {
-                            type: field.nonNull ? new graphql_1.GraphQLNonNull(connectFieldType) : connectFieldType,
-                            description: field.description,
-                            args: Object.assign({}, graphql_relay_1.connectionArgs, { where: { type: this._createFilterInputType(context, tableRef) }, order: { type: new graphql_1.GraphQLList(this._createSortingInputType(context, tableRef)) } }),
-                            resolve: this._options.adapter.resolve.bind(this._options.adapter),
-                            sqlColumn: field.name,
-                            sqlJoin: (parentTable, joinTable) => (`${parentTable}.${this._options.adapter.quote(field.name)}` +
-                                ` = ${joinTable}.${this._options.adapter.quote(field.fieldNameRef)}`),
-                            where: (tableAlias, args, context) => (this._createSQLWhere(tableRef, tableAlias, args.where, context)),
-                            orderBy: (args) => Schema._createObjectOrderBy(args.order)
-                        };
-                    }
+            const tableRef = Schema._findTableRef(context, field);
+            const fieldRef = Schema._findFieldRef(tableRef, field);
+            if (tableRef && fieldRef) {
+                const fieldName = Schema._escapeName(fields, `link_${field.name}`);
+                const fieldType = this._createType(context, tableRef);
+                const connectFieldType = this._createConnectionType(context, fieldType);
+                if (fieldType) {
+                    resultFields[fieldName] = {
+                        type: field.nonNull ? new graphql_1.GraphQLNonNull(connectFieldType) : connectFieldType,
+                        description: field.description,
+                        args: Object.assign({}, graphql_relay_1.connectionArgs, { where: { type: this._createFilterInputType(context, tableRef) }, order: { type: new graphql_1.GraphQLList(this._createSortingInputType(context, tableRef)) } }),
+                        resolve: this._options.adapter.resolve.bind(this._options.adapter),
+                        sqlColumn: field.name,
+                        sqlJoin: (parentTable, joinTable) => (`${parentTable}.${this._options.adapter.quote(field.name)}` +
+                            ` = ${joinTable}.${this._options.adapter.quote(fieldRef.name)}`),
+                        where: (tableAlias, args, context) => (this._createSQLWhere(tableRef, tableAlias, args.where, context)),
+                        orderBy: (args) => Schema._createObjectOrderBy(args.order)
+                    };
                 }
             }
             return resultFields;

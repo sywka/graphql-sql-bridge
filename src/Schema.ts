@@ -30,8 +30,8 @@ export interface IField extends IBase {
     readonly primary: boolean;
     readonly type: SchemaFieldTypes;
     readonly nonNull: boolean;
-    readonly tableNameRef: string;
-    readonly fieldNameRef: string;
+    readonly tableRefKey: ID;
+    readonly fieldRefKey: ID;
 }
 
 export interface ITable extends IBase {
@@ -123,6 +123,16 @@ export default class Schema<GraphQLContext> {
 
     protected static _findOriginalField(table: ITable, escapedFieldName): IField {
         return table.fields.find((field) => Schema._escapeName(table.fields, field.name) === escapedFieldName);
+    }
+
+    protected static _findTableRef(context: IContext, field: IField): ITable | null {
+        if (field.tableRefKey === undefined || field.tableRefKey === null) return null;
+        return context.tables.find((tableRef) => tableRef.id === field.tableRefKey);
+    }
+
+    protected static _findFieldRef(tableRef: ITable, field: IField): IField | null {
+        if (!tableRef || field.fieldRefKey === undefined || field.fieldRefKey === null) return null;
+        return tableRef.fields.find((fieldRef) => fieldRef.id === field.fieldRefKey);
     }
 
     protected static _createObjectOrderBy(order: any[]): { [fieldName: string]: string } | null {
@@ -498,36 +508,34 @@ export default class Schema<GraphQLContext> {
 
     protected _createTypeLinkFields(context: IContext, table: ITable, fields: IField[]): GraphQLFieldConfigMap<void, void> {
         return fields.reduce((resultFields, field) => {
-            if (field.tableNameRef) {
-                const tableRef = context.tables.find((table) => (
-                    table.name === Schema._escapeName(context.tables, field.tableNameRef)
-                ));
-                if (tableRef) {
-                    const fieldName = Schema._escapeName(fields, `link_${field.name}`);
-                    const fieldType = this._createType(context, tableRef);
-                    const connectFieldType = this._createConnectionType(context, fieldType);
+            const tableRef = Schema._findTableRef(context, field);
+            const fieldRef = Schema._findFieldRef(tableRef, field);
 
-                    if (fieldType) {
-                        resultFields[fieldName] = {
-                            type: field.nonNull ? new GraphQLNonNull(connectFieldType) : connectFieldType,
-                            description: field.description,
-                            args: {
-                                ...connectionArgs,
-                                where: {type: this._createFilterInputType(context, tableRef)},
-                                order: {type: new GraphQLList(this._createSortingInputType(context, tableRef))}
-                            },
-                            resolve: this._options.adapter.resolve.bind(this._options.adapter),
-                            sqlColumn: field.name,
-                            sqlJoin: (parentTable, joinTable) => (
-                                `${parentTable}.${this._options.adapter.quote(field.name)}` +
-                                ` = ${joinTable}.${this._options.adapter.quote(field.fieldNameRef)}`
-                            ),
-                            where: (tableAlias, args, context) => (
-                                this._createSQLWhere(tableRef, tableAlias, args.where, context)
-                            ),
-                            orderBy: (args) => Schema._createObjectOrderBy(args.order)
-                        };
-                    }
+            if (tableRef && fieldRef) {
+                const fieldName = Schema._escapeName(fields, `link_${field.name}`);
+                const fieldType = this._createType(context, tableRef);
+                const connectFieldType = this._createConnectionType(context, fieldType);
+
+                if (fieldType) {
+                    resultFields[fieldName] = {
+                        type: field.nonNull ? new GraphQLNonNull(connectFieldType) : connectFieldType,
+                        description: field.description,
+                        args: {
+                            ...connectionArgs,
+                            where: {type: this._createFilterInputType(context, tableRef)},
+                            order: {type: new GraphQLList(this._createSortingInputType(context, tableRef))}
+                        },
+                        resolve: this._options.adapter.resolve.bind(this._options.adapter),
+                        sqlColumn: field.name,
+                        sqlJoin: (parentTable, joinTable) => (
+                            `${parentTable}.${this._options.adapter.quote(field.name)}` +
+                            ` = ${joinTable}.${this._options.adapter.quote(fieldRef.name)}`
+                        ),
+                        where: (tableAlias, args, context) => (
+                            this._createSQLWhere(tableRef, tableAlias, args.where, context)
+                        ),
+                        orderBy: (args) => Schema._createObjectOrderBy(args.order)
+                    };
                 }
             }
             return resultFields;

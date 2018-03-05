@@ -86,14 +86,14 @@ export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
             const result: any[] = await database.query(`
               SELECT
                 TRIM(r.rdb$relation_name)                                   AS "tableName",
-                TRIM(rlf.rdb$relation_name) 
-                  || '_' || TRIM(rlf.rdb$field_name)                        AS "fieldKey",
                 TRIM(rlf.rdb$field_name)                                    AS "fieldName",
                 f.rdb$field_type                                            AS "fieldType",
                 IIF(constPrim.rdb$constraint_type = 'PRIMARY KEY', 1, null) AS "primaryFlag",
                 f.rdb$null_flag                                             AS "nullFlag",
                 TRIM(ref_rel_const.rdb$relation_name)                       AS "relationName",
-                TRIM(seg.rdb$field_name)                                    AS "relationFieldName"
+                TRIM(seg.rdb$field_name)                                    AS "relationFieldName",
+                TRIM(ref_rel_const.rdb$relation_name)                       AS "tableRefKey",
+                TRIM(seg.rdb$field_name)                                    AS "fieldRefKey"
                 
               FROM rdb$relations r
               
@@ -138,14 +138,14 @@ export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
                 name: {column: "tableName"},
                 description: {column: "tableName"},
                 fields: [{
-                    id: {column: "fieldKey", id: true},
+                    id: {column: "fieldName", id: true},
                     name: "fieldName",
                     description: {column: "fieldName"},
                     primary: {column: "primaryFlag", type: "BOOLEAN", default: false},
                     type: {column: "fieldType", type: FBAdapter._convertType},
                     nonNull: {column: "nullFlag", type: "BOOLEAN", default: false},
-                    tableNameRef: "relationName",
-                    fieldNameRef: "relationFieldName"
+                    tableRefKey: {column: "tableRefKey"},
+                    fieldRefKey: {column: "fieldRefKey"}
                 }]
             }];
 

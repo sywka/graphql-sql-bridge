@@ -11,8 +11,8 @@ export interface IField extends IBase {
     readonly primary: boolean;
     readonly type: SchemaFieldTypes;
     readonly nonNull: boolean;
-    readonly tableNameRef: string;
-    readonly fieldNameRef: string;
+    readonly tableRefKey: ID;
+    readonly fieldRefKey: ID;
 }
 export interface ITable extends IBase {
     readonly fields: IField[];
@@ -49,6 +49,8 @@ export default class Schema<GraphQLContext> {
     protected static _escapeName(bases: IBase[], name: string): string;
     protected static _findPrimaryFieldName(table: ITable): string;
     protected static _findOriginalField(table: ITable, escapedFieldName: any): IField;
+    protected static _findTableRef(context: IContext, field: IField): ITable | null;
+    protected static _findFieldRef(tableRef: ITable, field: IField): IField | null;
     protected static _createObjectOrderBy(order: any[]): {
         [fieldName: string]: string;
     } | null;
