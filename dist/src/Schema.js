@@ -18,10 +18,16 @@ class Schema {
     get schema() {
         return this._schema;
     }
-    static _convertPrimitiveFieldType(field) {
-        if (field.primary)
-            return graphql_1.GraphQLID;
-        switch (field.type) {
+    get context() {
+        return this._context;
+    }
+    set context(value) {
+        this._context = value;
+    }
+    static _convertPrimitiveFieldType(key) {
+        switch (key.type) {
+            case SchemaFieldTypes.ID:
+                return graphql_1.GraphQLID;
             case SchemaFieldTypes.BLOB:
                 return graphql_url_1.GraphQLUrl;
             case SchemaFieldTypes.INT:
@@ -37,76 +43,54 @@ class Schema {
                 return graphql_1.GraphQLString;
         }
     }
-    static _escapeName(bases, name) {
+    static _findObjectRef(context, key) {
+        if (key.objectRefID === undefined || key.objectRefID === null)
+            return null;
+        return context.objects.find((object) => object.id === key.objectRefID);
+    }
+    static _escapeOriginalName(bases, name) {
         let replaceValue = "__";
         while (true) {
             const escapedName = name.replace(/\$/g, replaceValue);
             if (escapedName === name)
                 return escapedName;
-            if (!bases.find((base) => base.name === escapedName)) {
+            if (!bases.find((item) => item.name === escapedName))
                 return escapedName;
-            }
             replaceValue += "_";
         }
     }
-    static _findPrimaryFieldName(table) {
-        const field = table.fields.find((field) => field.primary);
-        if (field)
-            return field.name;
-        return "";
+    static _escapeObjects(objects) {
+        return objects.forEach(object => {
+            object.name = Schema._escapeOriginalName(objects, object.originalName);
+            object.keys.forEach(key => {
+                key.name = Schema._escapeOriginalName(object.keys, key.originalName);
+            });
+        });
     }
-    static _findOriginalField(table, escapedFieldName) {
-        return table.fields.find((field) => Schema._escapeName(table.fields, field.name) === escapedFieldName);
-    }
-    static _findTableRef(context, field) {
-        if (field.tableRefKey === undefined || field.tableRefKey === null)
-            return null;
-        return context.tables.find((tableRef) => tableRef.id === field.tableRefKey);
-    }
-    static _findFieldRef(tableRef, field) {
-        if (!tableRef || field.fieldRefKey === undefined || field.fieldRefKey === null)
-            return null;
-        return tableRef.fields.find((fieldRef) => fieldRef.id === field.fieldRefKey);
-    }
-    static _createObjectOrderBy(order) {
-        if (!order)
-            return null;
-        return order.reduce((object, order) => {
-            const tmp = Object.keys(order).reduce((object, key) => {
-                object[order[key]] = key;
-                return object;
-            }, {});
-            return Object.assign({}, object, tmp);
-        }, {});
-    }
-    static _joinConditions(array, separator) {
-        if (!array.length)
-            return "";
-        if (array.length > 1)
-            return `(${array.join(separator)})`;
-        return array.join(separator);
-    }
-    async createSchema(hiddenProgress) {
+    async init(hiddenProgress) {
+        this._schema = null;
+        this._context = null;
         const total = 100;
         const progress = new Progress_1.default(total + 10, hiddenProgress);
-        const context = {
-            tables: [],
+        this._context = {
+            objects: [],
             types: [],
             inputTypes: [],
             connections: [],
             progress: {
-                tableTick: (table) => {
-                    progress.tick(`Creating GraphQL type: ${table.name}`, total / context.tables.length);
+                tableTick: (object) => {
+                    progress.tick(`Creating GraphQL type: ${object.name}`, total / this._context.objects.length);
                 }
             }
         };
         try {
             console.log("Creating GraphQL schema...");
             progress.tick("Reading database _schema...");
-            context.tables = await this._options.adapter.getTables();
+            this._context.objects = await this._options.adapter.getObjects();
+            Schema._escapeObjects(this._context.objects);
             progress.tick("Creating GraphQL _schema...", 8);
             this._schema = new graphql_1.GraphQLSchema({
-                query: this._createQueryType(context)
+                query: this._createQueryType(this._context)
             });
             progress.tick("Done.");
             console.log("GraphQL schema created.");
@@ -117,76 +101,9 @@ class Schema {
             throw error;
         }
     }
-    _createSQLWhere(table, tableAlias, where, context) {
-        if (!where)
-            return "";
-        let groupsConditions = Object.keys(where).reduce((groupsConditions, filterName) => {
-            switch (filterName) {
-                case "not":
-                case "or":
-                case "and":
-                case "isNull":
-                    return groupsConditions;
-            }
-            const filter = where[filterName];
-            let conditions = [];
-            if (Array.isArray(filter)) {
-                filter.forEach((item) => {
-                    const condition = this._options.adapter.createSQLCondition(filterName, tableAlias, Schema._findOriginalField(table, item));
-                    if (condition)
-                        conditions.push(condition);
-                });
-            }
-            else if (typeof filter === "string") {
-                const condition = this._options.adapter.createSQLCondition(filterName, tableAlias, Schema._findOriginalField(table, filter));
-                if (condition)
-                    conditions.push(condition);
-            }
-            else if (typeof filter === "object") {
-                conditions = Object.keys(filter).reduce((conditions, fieldName) => {
-                    const value = filter[fieldName];
-                    const condition = this._options.adapter.createSQLCondition(filterName, tableAlias, Schema._findOriginalField(table, fieldName), value);
-                    if (condition)
-                        conditions.push(condition);
-                    return conditions;
-                }, conditions);
-            }
-            if (conditions.length)
-                groupsConditions.push(Schema._joinConditions(conditions, " AND "));
-            return groupsConditions;
-        }, []);
-        if (where.isNull) {
-            groupsConditions.push(`${tableAlias}.${this._options.adapter.quote(where.isNull)} IS NULL`);
-        }
-        if (where.not) {
-            const not = where.not.reduce((conditions, item) => {
-                conditions.push(this._createSQLWhere(table, tableAlias, item, context));
-                return conditions;
-            }, []);
-            if (not.length)
-                groupsConditions.push(`NOT ${Schema._joinConditions(not, " AND ")}`);
-        }
-        if (where.or) {
-            const or = where.or.reduce((conditions, item) => {
-                conditions.push(this._createSQLWhere(table, tableAlias, item, context));
-                return conditions;
-            }, []);
-            if (or.length)
-                groupsConditions.push(Schema._joinConditions(or, " OR "));
-        }
-        if (where.and) {
-            const and = where.and.reduce((conditions, item) => {
-                conditions.push(this._createSQLWhere(table, tableAlias, item, context));
-                return conditions;
-            }, []);
-            if (and.length)
-                groupsConditions.push(Schema._joinConditions(and, " AND "));
-        }
-        return Schema._joinConditions(groupsConditions, " AND ");
-    }
     _createQueryType(context) {
         const queryType = new graphql_1.GraphQLObjectType({
-            name: "Tables",
+            name: "Objects",
             fields: () => this._createQueryTypeFields(context)
         });
         if (!Object.keys(queryType.getFields()).length)
@@ -194,80 +111,78 @@ class Schema {
         return queryType;
     }
     _createQueryTypeFields(context) {
-        return context.tables.reduce((fields, table) => {
-            const fieldType = this._createType(context, table);
-            if (fieldType) {
-                fields[Schema._escapeName(context.tables, table.name)] = {
-                    type: this._createConnectionType(context, fieldType),
-                    description: table.description,
-                    args: Object.assign({}, graphql_relay_1.connectionArgs, { where: { type: this._createFilterInputType(context, table) }, order: { type: new graphql_1.GraphQLList(this._createSortingInputType(context, table)) } }),
-                    where: (tableAlias, args, context) => (this._createSQLWhere(table, tableAlias, args.where, context)),
-                    orderBy: (args) => Schema._createObjectOrderBy(args.order),
+        return context.objects.reduce((keys, object) => {
+            const keyType = this._createType(context, object);
+            if (keyType) {
+                keys[object.name] = {
+                    type: this._createConnectionType(context, keyType),
+                    description: object.description,
+                    args: Object.assign({}, graphql_relay_1.connectionArgs, { where: { type: this._createFilterInputType(context, object) }, order: { type: new graphql_1.GraphQLList(this._createSortingInputType(context, object)) } }),
                     resolve: this._options.adapter.resolve.bind(this._options.adapter)
                 };
             }
-            return fields;
+            return keys;
         }, {});
     }
-    _createSortingInputType(context, table) {
-        const duplicate = context.inputTypes.find(type => (type.name === `SORTING_${Schema._escapeName(context.tables, table.name)}`));
+    _createSortingInputType(context, object) {
+        const duplicate = context.inputTypes.find(type => (type.name === `SORTING_${object.name}`));
         if (duplicate)
             return duplicate;
         const sortingFieldsEnumType = new graphql_1.GraphQLEnumType({
-            name: `SORTING_FIELDS_${Schema._escapeName(context.tables, table.name)}`,
-            values: table.fields.reduce((values, field) => {
-                values[Schema._escapeName(table.fields, field.name)] = {
-                    value: field.name,
-                    description: field.description
+            name: `SORTING_FIELDS_${object.name}`,
+            values: object.keys.reduce((values, key) => {
+                values[key.name] = {
+                    value: key.name,
+                    description: key.description
                 };
                 return values;
             }, {})
         });
         const inputType = new graphql_1.GraphQLInputObjectType({
-            name: `SORTING_${Schema._escapeName(context.tables, table.name)}`,
+            name: `SORTING_${object.name}`,
             fields: () => ({
-                asc: { type: sortingFieldsEnumType },
-                desc: { type: sortingFieldsEnumType }
+                [SortType.ASC]: { type: sortingFieldsEnumType },
+                [SortType.DESC]: { type: sortingFieldsEnumType }
             })
         });
         context.inputTypes.push(inputType);
         return inputType;
     }
-    _createFilterInputType(context, table) {
-        const duplicate = context.inputTypes.find(type => (type.name === `FILTER_${Schema._escapeName(context.tables, table.name)}`));
+    _createFilterInputType(context, object) {
+        const duplicate = context.inputTypes.find(type => (type.name === `FILTER_${object.name}`));
         if (duplicate)
             return duplicate;
         const inputType = new graphql_1.GraphQLInputObjectType({
-            name: `FILTER_${Schema._escapeName(context.tables, table.name)}`,
-            fields: () => this._createFilterInputTypeFields(context, table, inputType)
+            name: `FILTER_${object.name}`,
+            fields: () => this._createFilterInputTypeFields(context, object, inputType)
         });
         context.inputTypes.push(inputType);
         return inputType;
     }
-    _createFilterInputTypeFields(context, table, inputType) {
+    _createFilterInputTypeFields(context, object, inputType) {
         const equalsType = new graphql_1.GraphQLInputObjectType({
-            name: `EQUALS_${Schema._escapeName(context.tables, table.name)}`,
-            fields: table.fields.reduce((fields, field) => {
-                switch (field.type) {
+            name: `EQUALS_${object.name}`,
+            fields: object.keys.reduce((fields, key) => {
+                switch (key.type) {
                     case SchemaFieldTypes.BLOB:
                         break;
                     default:
-                        fields[Schema._escapeName(table.fields, field.name)] = {
-                            type: Schema._convertPrimitiveFieldType(field),
-                            description: field.description
+                        fields[key.name] = {
+                            type: Schema._convertPrimitiveFieldType(key),
+                            description: key.description
                         };
                 }
                 return fields;
             }, {})
         });
         const containsType = new graphql_1.GraphQLInputObjectType({
-            name: `CONTAINS_${Schema._escapeName(context.tables, table.name)}`,
-            fields: table.fields.reduce((fields, field) => {
-                switch (field.type) {
+            name: `CONTAINS_${object.name}`,
+            fields: object.keys.reduce((fields, key) => {
+                switch (key.type) {
                     case SchemaFieldTypes.STRING:
-                        fields[Schema._escapeName(table.fields, field.name)] = {
-                            type: Schema._convertPrimitiveFieldType(field),
-                            description: field.description
+                        fields[key.name] = {
+                            type: Schema._convertPrimitiveFieldType(key),
+                            description: key.description
                         };
                         break;
                 }
@@ -275,39 +190,39 @@ class Schema {
             }, {})
         });
         const nullableFieldsEnumType = new graphql_1.GraphQLEnumType({
-            name: `IS_NULL_FIELDS_${Schema._escapeName(context.tables, table.name)}`,
-            values: table.fields.reduce((values, field) => {
-                if (!field.nonNull) {
-                    values[Schema._escapeName(table.fields, field.name)] = {
-                        value: field.name,
-                        description: field.description
+            name: `IS_NULL_FIELDS_${object.name}`,
+            values: object.keys.reduce((values, key) => {
+                if (!key.nonNull) {
+                    values[key.name] = {
+                        value: key.name,
+                        description: key.description
                     };
                 }
                 return values;
             }, {})
         });
         const emptyFieldsEnumType = new graphql_1.GraphQLEnumType({
-            name: `IS_EMPTY_FIELDS_${Schema._escapeName(context.tables, table.name)}`,
-            values: table.fields.reduce((values, field) => {
-                switch (field.type) {
+            name: `IS_EMPTY_FIELDS_${object.name}`,
+            values: object.keys.reduce((values, key) => {
+                switch (key.type) {
                     case SchemaFieldTypes.BLOB:
                     case SchemaFieldTypes.STRING:
-                        values[Schema._escapeName(table.fields, field.name)] = {
-                            value: field.name,
-                            description: field.description
+                        values[key.name] = {
+                            value: key.name,
+                            description: key.description
                         };
                 }
                 return values;
             }, {})
         });
         const beginsOrEndsType = new graphql_1.GraphQLInputObjectType({
-            name: `BEGINS_OR_ENDS_${Schema._escapeName(context.tables, table.name)}`,
-            fields: table.fields.reduce((fields, field) => {
-                switch (field.type) {
+            name: `BEGINS_OR_ENDS_${object.name}`,
+            fields: object.keys.reduce((fields, key) => {
+                switch (key.type) {
                     case SchemaFieldTypes.STRING:
-                        fields[Schema._escapeName(table.fields, field.name)] = {
-                            type: Schema._convertPrimitiveFieldType(field),
-                            description: field.description
+                        fields[key.name] = {
+                            type: Schema._convertPrimitiveFieldType(key),
+                            description: key.description
                         };
                         break;
                 }
@@ -315,15 +230,15 @@ class Schema {
             }, {})
         });
         const greaterOrLessType = new graphql_1.GraphQLInputObjectType({
-            name: `GREATER_OR_LESS_${Schema._escapeName(context.tables, table.name)}`,
-            fields: table.fields.reduce((fields, field) => {
-                switch (field.type) {
+            name: `GREATER_OR_LESS_${object.name}`,
+            fields: object.keys.reduce((fields, key) => {
+                switch (key.type) {
                     case SchemaFieldTypes.DATE:
                     case SchemaFieldTypes.INT:
                     case SchemaFieldTypes.FLOAT:
-                        fields[Schema._escapeName(table.fields, field.name)] = {
-                            type: Schema._convertPrimitiveFieldType(field),
-                            description: field.description
+                        fields[key.name] = {
+                            type: Schema._convertPrimitiveFieldType(key),
+                            description: key.description
                         };
                         break;
                 }
@@ -340,19 +255,18 @@ class Schema {
         } : {}, Object.keys(greaterOrLessType.getFields()).length ? {
             [FilterTypes.GREATER]: { type: greaterOrLessType },
             [FilterTypes.LESS]: { type: greaterOrLessType }
-        } : {}, nullableFieldsEnumType.getValues().length ? {
-            isNull: { type: nullableFieldsEnumType }
         } : {}, emptyFieldsEnumType.getValues().length ? {
             isEmpty: { type: emptyFieldsEnumType }
-        } : {}, { or: { type: new graphql_1.GraphQLList(inputType) }, and: { type: new graphql_1.GraphQLList(inputType) }, not: { type: new graphql_1.GraphQLList(inputType) } });
+        } : {}, nullableFieldsEnumType.getValues().length ? {
+            [IntegratedFilterTypes.IS_NULL]: { type: nullableFieldsEnumType }
+        } : {}, { [IntegratedFilterTypes.OR]: { type: new graphql_1.GraphQLList(inputType) }, [IntegratedFilterTypes.AND]: { type: new graphql_1.GraphQLList(inputType) }, [IntegratedFilterTypes.NOT]: { type: new graphql_1.GraphQLList(inputType) } });
     }
     _createConnectionType(context, type) {
-        const name = Schema._escapeName(context.tables, type.name);
-        let connection = context.connections.find((connection) => (connection.connectionType.name === name + "Connection"));
+        let connection = context.connections.find((connection) => (connection.connectionType.name === type.name + "Connection"));
         if (connection)
             return connection.connectionType;
         connection = graphql_relay_1.connectionDefinitions({
-            name,
+            name: type.name,
             nodeType: type,
             connectionFields: {
                 total: { type: graphql_1.GraphQLInt }
@@ -361,62 +275,55 @@ class Schema {
         context.connections.push(connection);
         return connection.connectionType;
     }
-    _createType(context, table) {
-        const duplicate = context.types.find(type => (type.name === Schema._escapeName(context.tables, table.name)));
+    _createType(context, object) {
+        const duplicate = context.types.find(type => type.name === object.name);
         if (duplicate)
             return duplicate;
-        context.progress.tableTick(table);
+        context.progress.tableTick(object);
         const type = new graphql_1.GraphQLObjectType({
-            name: Schema._escapeName(context.tables, table.name),
-            sqlTable: table.name,
-            uniqueKey: Schema._findPrimaryFieldName(table),
-            description: table.description,
-            fields: () => this._createTypeFields(context, table)
+            name: object.name,
+            description: object.description,
+            fields: () => this._createTypeFields(context, object),
+            object
         });
         context.types.push(type);
         if (!Object.keys(type.getFields()).length)
             return null;
         return type;
     }
-    _createTypeFields(context, table) {
-        const fields = this._createTypePrimitiveFields(table.fields);
-        const linkFields = this._createTypeLinkFields(context, table, table.fields);
+    _createTypeFields(context, object) {
+        const fields = this._createTypePrimitiveFields(object.keys);
+        const linkFields = this._createTypeLinkFields(context, object, object.keys);
         return Object.assign({}, fields, linkFields);
     }
-    _createTypeLinkFields(context, table, fields) {
-        return fields.reduce((resultFields, field) => {
-            const tableRef = Schema._findTableRef(context, field);
-            const fieldRef = Schema._findFieldRef(tableRef, field);
-            if (tableRef && fieldRef) {
-                const fieldName = Schema._escapeName(fields, `link_${field.name}`);
-                const fieldType = this._createType(context, tableRef);
-                const connectFieldType = this._createConnectionType(context, fieldType);
-                if (fieldType) {
-                    resultFields[fieldName] = {
-                        type: field.nonNull ? new graphql_1.GraphQLNonNull(connectFieldType) : connectFieldType,
-                        description: field.description,
-                        args: Object.assign({}, graphql_relay_1.connectionArgs, { where: { type: this._createFilterInputType(context, tableRef) }, order: { type: new graphql_1.GraphQLList(this._createSortingInputType(context, tableRef)) } }),
+    _createTypeLinkFields(context, object, keys) {
+        return keys.reduce((fields, key) => {
+            const objectRef = Schema._findObjectRef(context, key);
+            if (objectRef) {
+                const keyType = this._createType(context, objectRef);
+                const connectFieldType = this._createConnectionType(context, keyType);
+                if (keyType) {
+                    fields[`link_${key.name}`] = {
+                        type: key.nonNull ? new graphql_1.GraphQLNonNull(connectFieldType) : connectFieldType,
+                        description: key.description,
+                        args: Object.assign({}, graphql_relay_1.connectionArgs, { where: { type: this._createFilterInputType(context, objectRef) }, order: { type: new graphql_1.GraphQLList(this._createSortingInputType(context, objectRef)) } }),
                         resolve: this._options.adapter.resolve.bind(this._options.adapter),
-                        sqlColumn: field.name,
-                        sqlJoin: (parentTable, joinTable) => (`${parentTable}.${this._options.adapter.quote(field.name)}` +
-                            ` = ${joinTable}.${this._options.adapter.quote(fieldRef.name)}`),
-                        where: (tableAlias, args, context) => (this._createSQLWhere(tableRef, tableAlias, args.where, context)),
-                        orderBy: (args) => Schema._createObjectOrderBy(args.order)
+                        key,
+                        objectRef
                     };
                 }
             }
-            return resultFields;
+            return fields;
         }, {});
     }
-    _createTypePrimitiveFields(fields) {
-        return fields.reduce((resultFields, field) => {
-            const fieldName = Schema._escapeName(fields, field.name);
-            const fieldType = Schema._convertPrimitiveFieldType(field);
-            resultFields[fieldName] = {
-                type: field.nonNull ? new graphql_1.GraphQLNonNull(fieldType) : fieldType,
-                description: field.description,
+    _createTypePrimitiveFields(keys) {
+        return keys.reduce((resultFields, key) => {
+            const keyType = Schema._convertPrimitiveFieldType(key);
+            resultFields[key.name] = {
+                type: key.nonNull ? new graphql_1.GraphQLNonNull(keyType) : keyType,
+                description: key.description,
                 resolve: this._options.adapter.resolve.bind(this._options.adapter),
-                sqlColumn: field.name
+                key
             };
             return resultFields;
         }, {});
@@ -425,13 +332,26 @@ class Schema {
 exports.default = Schema;
 var SchemaFieldTypes;
 (function (SchemaFieldTypes) {
-    SchemaFieldTypes[SchemaFieldTypes["BOOLEAN"] = 0] = "BOOLEAN";
-    SchemaFieldTypes[SchemaFieldTypes["STRING"] = 1] = "STRING";
-    SchemaFieldTypes[SchemaFieldTypes["INT"] = 2] = "INT";
-    SchemaFieldTypes[SchemaFieldTypes["FLOAT"] = 3] = "FLOAT";
-    SchemaFieldTypes[SchemaFieldTypes["DATE"] = 4] = "DATE";
-    SchemaFieldTypes[SchemaFieldTypes["BLOB"] = 5] = "BLOB";
+    SchemaFieldTypes[SchemaFieldTypes["ID"] = 0] = "ID";
+    SchemaFieldTypes[SchemaFieldTypes["BOOLEAN"] = 1] = "BOOLEAN";
+    SchemaFieldTypes[SchemaFieldTypes["STRING"] = 2] = "STRING";
+    SchemaFieldTypes[SchemaFieldTypes["INT"] = 3] = "INT";
+    SchemaFieldTypes[SchemaFieldTypes["FLOAT"] = 4] = "FLOAT";
+    SchemaFieldTypes[SchemaFieldTypes["DATE"] = 5] = "DATE";
+    SchemaFieldTypes[SchemaFieldTypes["BLOB"] = 6] = "BLOB";
 })(SchemaFieldTypes = exports.SchemaFieldTypes || (exports.SchemaFieldTypes = {}));
+var SortType;
+(function (SortType) {
+    SortType["ASC"] = "asc";
+    SortType["DESC"] = "desc";
+})(SortType = exports.SortType || (exports.SortType = {}));
+var IntegratedFilterTypes;
+(function (IntegratedFilterTypes) {
+    IntegratedFilterTypes["NOT"] = "not";
+    IntegratedFilterTypes["OR"] = "or";
+    IntegratedFilterTypes["AND"] = "and";
+    IntegratedFilterTypes["IS_NULL"] = "isNull";
+})(IntegratedFilterTypes = exports.IntegratedFilterTypes || (exports.IntegratedFilterTypes = {}));
 var FilterTypes;
 (function (FilterTypes) {
     FilterTypes["EQUALS"] = "equals";

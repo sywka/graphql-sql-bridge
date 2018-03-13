@@ -4,11 +4,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 }
 Object.defineProperty(exports, "__esModule", { value: true });
 const nesthydrationjs_1 = __importDefault(require("nesthydrationjs"));
-const join_monster_1 = __importDefault(require("join-monster"));
 const graphql_relay_1 = require("graphql-relay");
 const graphql_url_1 = require("graphql-url");
 const Schema_1 = require("../../Schema");
 const FBDatabase_1 = __importDefault(require("./FBDatabase"));
+const SQLJoiner_1 = __importDefault(require("../SQLJoiner"));
+const SQLObjectKey_1 = __importDefault(require("../SQLObjectKey"));
+const FBObject_1 = __importDefault(require("./FBObject"));
 class FBAdapter {
     constructor(source, options) {
         this._source = source;
@@ -40,10 +42,7 @@ class FBAdapter {
                 return Schema_1.SchemaFieldTypes.STRING;
         }
     }
-    quote(str) {
-        return `"${str}"`;
-    }
-    async getTables() {
+    async getObjects() {
         return await FBDatabase_1.default.executeDatabase(this.source, async (database) => {
             const { include, exclude, includePattern, excludePattern } = this._options;
             const includeEscaped = include ? include.map((item) => `'${item}'`) : [];
@@ -112,7 +111,8 @@ class FBAdapter {
                             fieldRefKey: { column: "fieldRefKey" }
                         }]
                 }];
-            return nesthydrationjs_1.default().nest(result, definition);
+            const tables = nesthydrationjs_1.default().nest(result, definition);
+            return tables.map(table => new FBObject_1.default(table.id, table.name, table.description, table.fields.map(field => new SQLObjectKey_1.default(field.id, field.name, field.description, field.nonNull, field.type, field.primary, field.tableRefKey, field.fieldRefKey))));
         });
     }
     async resolve(source, args, context, info) {
@@ -121,14 +121,21 @@ class FBAdapter {
             const field = source[info.fieldName];
             //resolve BLOB fields
             if (info.returnType === graphql_url_1.GraphQLUrl && typeof field === "function") {
-                const { sqlTable, uniqueKey } = info.parentType._typeConfig;
-                const id = {
-                    table: sqlTable,
-                    field: info.fieldName,
-                    primaryField: uniqueKey,
-                    primaryKey: source[uniqueKey]
-                };
-                return this._options.blobLinkCreator(id);
+                const config = info.parentType._typeConfig;
+                if (config) {
+                    const object = config.object;
+                    const primaryKeys = object.findPrimaryKeys();
+                    const id = {
+                        objectID: object.id,
+                        keyID: object.keys.find(key => key.name === info.fieldName).id,
+                        primaryFields: primaryKeys.filter(key => source[key.name]).map(key => ({
+                            keyID: key.id,
+                            value: source[key.name]
+                        }))
+                    };
+                    return this._options.blobLinkCreator(id);
+                }
+                return null;
             }
             // resolve connections
             if (Array.isArray(field)) {
@@ -136,39 +143,11 @@ class FBAdapter {
             }
             return field;
         }
-        // resolve root query
-        const result = await join_monster_1.default(info, {}, (sql) => {
+        const result = await SQLJoiner_1.default.join(info, { minify: false }, (sql) => {
             console.log(sql);
             return context.query(sql);
         });
         return Object.assign({ total: result.length }, graphql_relay_1.connectionFromArray(result, args));
-    }
-    createSQLCondition(filterType, tableAlias, field, value) {
-        let tableField = `${tableAlias}.${this.quote(field.name)}`;
-        if (field.type === Schema_1.SchemaFieldTypes.DATE) {
-            tableField = `CAST(${tableField} AS TIMESTAMP)`;
-        }
-        if (value) {
-            value = FBDatabase_1.default.escape(value);
-        }
-        switch (filterType) {
-            case Schema_1.FilterTypes.IS_EMPTY:
-                return `${tableField} = ''`;
-            case Schema_1.FilterTypes.EQUALS:
-                return `${tableField} = ${value}`;
-            case Schema_1.FilterTypes.CONTAINS:
-                return `${tableField} CONTAINING ${value}`;
-            case Schema_1.FilterTypes.BEGINS:
-                return `${tableField} STARTING WITH ${value}`;
-            case Schema_1.FilterTypes.ENDS:
-                return `REVERSE(${tableField}) STARTING WITH ${value}`;
-            case Schema_1.FilterTypes.GREATER:
-                return `${tableField} > ${value}`;
-            case Schema_1.FilterTypes.LESS:
-                return `${tableField} < ${value}`;
-            default:
-                return "";
-        }
     }
 }
 exports.default = FBAdapter;

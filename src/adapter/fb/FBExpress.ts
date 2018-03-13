@@ -3,8 +3,10 @@ import graphqlHTTP from "express-graphql";
 import FBAdapter, {IBlobID, ISchemaDetailOptions} from "./FBAdapter";
 import FBDatabase, {DBOptions, FBConnectionPool, FBTransaction} from "./FBDatabase";
 import FBGraphQLContext from "./FBGraphQLContext";
-import Schema from "../../Schema";
+import Schema, {FilterTypes, IntegratedFilterTypes} from "../../Schema";
 import BaseRouter from "../../BaseRouter";
+import FBObject from "./FBObject";
+import SQLObjectKey from "../SQLObjectKey";
 
 export interface FBExpressOptions extends ISchemaDetailOptions, DBOptions {
     graphiql?: boolean;
@@ -26,7 +28,7 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
         this.connectionPool.createConnectionPool(options, options.maxConnectionPool);
 
         this._schema = this._getSchema(options);
-        this._schema.createSchema().catch(console.error);
+        this._schema.init().catch(console.error);
     }
 
     get connectionPool(): FBConnectionPool {
@@ -60,11 +62,24 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
     protected async _queryBlobMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
         try {
             await FBDatabase.executeTransaction(this.connectionPool, async (transaction: FBTransaction) => {
-                const result = await transaction.query(`
-                    SELECT ${req.query.field} AS "binaryField"
-                    FROM ${req.query.table}
-                    WHERE ${req.query.primaryField} = ${req.query.primaryKey} 
-                `);
+                if (!this._schema || !this._schema.schema) throw new Error("Temporarily unavailable");
+
+                const id: IBlobID = req.query;
+                const object = <FBObject<SQLObjectKey>>this._schema.context.objects.find(object => (
+                    object.id === id.objectID
+                ));
+                const result = await transaction.query(object.makeQuery([{
+                    key: object.keys.find(key => key.id === id.keyID),
+                    alias: "binaryField"
+                }], {
+                    where: {
+                        [IntegratedFilterTypes.AND]: id.primaryFields.map(field => ({
+                            [FilterTypes.EQUALS]: {
+                                [object.findPrimaryKeys().find(key => key.id === field.keyID).name]: field.value
+                            }
+                        }))
+                    }
+                }, "BLOB"));
 
                 const blobStream = await FBDatabase.blobToStream(result[0].binaryField);    //TODO fix lib
                 blobStream.pipe(res);

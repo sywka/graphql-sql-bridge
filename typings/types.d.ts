@@ -1,4 +1,5 @@
 import {
+    FieldDefinitionNode,
     GraphQLFieldConfigArgumentMap,
     GraphQLFieldConfigMap,
     GraphQLFieldMap,
@@ -6,11 +7,14 @@ import {
     GraphQLInterfaceType,
     GraphQLIsTypeOfFn,
     GraphQLOutputType,
-    Thunk
-} from "graphql/type/definition";
-import {FieldDefinitionNode, ObjectTypeDefinitionNode, TypeExtensionNode} from "graphql/language/ast";
+    ObjectTypeDefinitionNode,
+    Thunk,
+    TypeExtensionNode
+} from "graphql";
 
-declare module 'graphql' {
+declare module "graphql" {
+
+    import {ISchemaObject, ISchemaObjectKey} from "../src";
 
     export class GraphQLObjectType {
         name: string;
@@ -37,6 +41,9 @@ declare module 'graphql' {
         astNode?: ObjectTypeDefinitionNode;
         extensionASTNodes?: Array<TypeExtensionNode>;
 
+        objects?: ISchemaObject[];
+        object?: ISchemaObject;
+
         sqlTable?: string;
         uniqueKey?: string | string[];
     }
@@ -49,6 +56,9 @@ declare module 'graphql' {
         deprecationReason?: string;
         description?: string;
         astNode?: FieldDefinitionNode;
+
+        key?: ISchemaObjectKey;
+        objectRef?: ISchemaObject;
 
         sqlColumn?: string;
     }

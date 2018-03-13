@@ -1,42 +1,37 @@
-import { GraphQLInputObjectType, GraphQLObjectType, GraphQLScalarType, GraphQLSchema } from "graphql";
-import { GraphQLFieldConfigMap, GraphQLInputFieldConfigMap, GraphQLResolveInfo } from "graphql/type/definition";
+import { GraphQLFieldConfigMap, GraphQLInputFieldConfigMap, GraphQLInputObjectType, GraphQLObjectType, GraphQLResolveInfo, GraphQLScalarType, GraphQLSchema } from "graphql";
 import { GraphQLConnectionDefinitions } from "graphql-relay";
 export declare type ID = number | string;
 export interface IBase {
-    readonly id: ID;
-    readonly name: string;
+    id: ID;
+    name: string;
+    originalName: string;
     description: string;
 }
-export interface IField extends IBase {
-    readonly primary: boolean;
-    readonly type: SchemaFieldTypes;
-    readonly nonNull: boolean;
-    readonly tableRefKey: ID;
-    readonly fieldRefKey: ID;
+export interface ISchemaObjectKey extends IBase {
+    nonNull: boolean;
+    type: SchemaFieldTypes;
+    objectRefID: ID;
 }
-export interface ITable extends IBase {
-    readonly fields: IField[];
+export interface ISchemaObject extends IBase {
+    keys: ISchemaObjectKey[];
 }
-export declare type Value = string | number | boolean | Date | DateConstructor;
 export declare type Args = {
     [argName: string]: any;
 };
 export interface ISchemaAdapter<GraphQLContext> {
-    quote(str: string): string;
-    getTables(): Promise<ITable[]>;
+    getObjects(): Promise<ISchemaObject[]>;
     resolve(source: any, args: Args, context: GraphQLContext, info: GraphQLResolveInfo): any;
-    createSQLCondition(filterType: FilterTypes, tableAlias: string, field: IField, value?: Value): string;
 }
 export interface ISchemaOptions<GraphQLContext> {
     adapter: ISchemaAdapter<GraphQLContext>;
 }
 export interface IContext {
-    tables: ITable[];
+    objects: ISchemaObject[];
     types: GraphQLObjectType[];
     inputTypes: GraphQLInputObjectType[];
     connections: GraphQLConnectionDefinitions[];
     progress: {
-        tableTick: (table: ITable) => void;
+        tableTick: (object: ISchemaObject) => void;
     };
 }
 export default class Schema<GraphQLContext> {
@@ -45,36 +40,42 @@ export default class Schema<GraphQLContext> {
     readonly options: ISchemaOptions<GraphQLContext>;
     protected _schema: GraphQLSchema;
     readonly schema: GraphQLSchema;
-    protected static _convertPrimitiveFieldType(field: IField): GraphQLScalarType;
-    protected static _escapeName(bases: IBase[], name: string): string;
-    protected static _findPrimaryFieldName(table: ITable): string;
-    protected static _findOriginalField(table: ITable, escapedFieldName: any): IField;
-    protected static _findTableRef(context: IContext, field: IField): ITable | null;
-    protected static _findFieldRef(tableRef: ITable, field: IField): IField | null;
-    protected static _createObjectOrderBy(order: any[]): {
-        [fieldName: string]: string;
-    } | null;
-    protected static _joinConditions(array: any[], separator: string): string;
-    createSchema(hiddenProgress?: boolean): Promise<GraphQLSchema>;
-    protected _createSQLWhere(table: ITable, tableAlias: string, where: any, context: GraphQLContext): string;
+    private _context;
+    context: IContext;
+    protected static _convertPrimitiveFieldType(key: ISchemaObjectKey): GraphQLScalarType;
+    protected static _findObjectRef(context: IContext, key: ISchemaObjectKey): ISchemaObject | null;
+    protected static _escapeOriginalName(bases: IBase[], name: string): string;
+    protected static _escapeObjects(objects: ISchemaObject[]): void;
+    init(hiddenProgress?: boolean): Promise<GraphQLSchema>;
     protected _createQueryType(context: IContext): GraphQLObjectType | null;
     protected _createQueryTypeFields(context: IContext): GraphQLFieldConfigMap<void, void>;
-    protected _createSortingInputType(context: IContext, table: ITable): GraphQLInputObjectType;
-    protected _createFilterInputType(context: IContext, table: ITable): GraphQLInputObjectType;
-    protected _createFilterInputTypeFields(context: IContext, table: ITable, inputType: GraphQLInputObjectType): GraphQLInputFieldConfigMap;
+    protected _createSortingInputType(context: IContext, object: ISchemaObject): GraphQLInputObjectType;
+    protected _createFilterInputType(context: IContext, object: ISchemaObject): GraphQLInputObjectType;
+    protected _createFilterInputTypeFields(context: IContext, object: ISchemaObject, inputType: GraphQLInputObjectType): GraphQLInputFieldConfigMap;
     protected _createConnectionType(context: IContext, type: GraphQLObjectType): GraphQLObjectType;
-    protected _createType(context: IContext, table: ITable): GraphQLObjectType | null;
-    protected _createTypeFields(context: IContext, table: ITable): GraphQLFieldConfigMap<void, void>;
-    protected _createTypeLinkFields(context: IContext, table: ITable, fields: IField[]): GraphQLFieldConfigMap<void, void>;
-    protected _createTypePrimitiveFields(fields: IField[]): GraphQLFieldConfigMap<void, void>;
+    protected _createType(context: IContext, object: ISchemaObject): GraphQLObjectType | null;
+    protected _createTypeFields(context: IContext, object: ISchemaObject): GraphQLFieldConfigMap<void, void>;
+    protected _createTypeLinkFields(context: IContext, object: ISchemaObject, keys: ISchemaObjectKey[]): GraphQLFieldConfigMap<void, void>;
+    protected _createTypePrimitiveFields(keys: ISchemaObjectKey[]): GraphQLFieldConfigMap<void, void>;
 }
 export declare enum SchemaFieldTypes {
-    BOOLEAN = 0,
-    STRING = 1,
-    INT = 2,
-    FLOAT = 3,
-    DATE = 4,
-    BLOB = 5,
+    ID = 0,
+    BOOLEAN = 1,
+    STRING = 2,
+    INT = 3,
+    FLOAT = 4,
+    DATE = 5,
+    BLOB = 6,
+}
+export declare enum SortType {
+    ASC = "asc",
+    DESC = "desc",
+}
+export declare enum IntegratedFilterTypes {
+    NOT = "not",
+    OR = "or",
+    AND = "and",
+    IS_NULL = "isNull",
 }
 export declare enum FilterTypes {
     EQUALS = "equals",

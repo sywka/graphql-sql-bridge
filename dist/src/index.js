@@ -17,6 +17,7 @@ const BaseRouter_1 = __importDefault(require("./BaseRouter"));
 exports.BaseRouter = BaseRouter_1.default;
 const FBDatabase_1 = __importDefault(require("./adapter/fb/FBDatabase"));
 exports.FBDatabase = FBDatabase_1.default;
+exports.FBase = FBDatabase_1.FBase;
 exports.FBConnectionPool = FBDatabase_1.FBConnectionPool;
 exports.FBTransaction = FBDatabase_1.FBTransaction;
 exports.IsolationTypes = FBDatabase_1.IsolationTypes;

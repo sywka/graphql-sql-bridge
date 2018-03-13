@@ -16,7 +16,7 @@ class FBExpress extends BaseRouter_1.default {
         this._connectionPool = new FBDatabase_1.FBConnectionPool();
         this.connectionPool.createConnectionPool(options, options.maxConnectionPool);
         this._schema = this._getSchema(options);
-        this._schema.createSchema().catch(console.error);
+        this._schema.init().catch(console.error);
     }
     get connectionPool() {
         return this._connectionPool;
@@ -41,11 +41,22 @@ class FBExpress extends BaseRouter_1.default {
     async _queryBlobMiddleware(req, res, next) {
         try {
             await FBDatabase_1.default.executeTransaction(this.connectionPool, async (transaction) => {
-                const result = await transaction.query(`
-                    SELECT ${req.query.field} AS "binaryField"
-                    FROM ${req.query.table}
-                    WHERE ${req.query.primaryField} = ${req.query.primaryKey} 
-                `);
+                if (!this._schema || !this._schema.schema)
+                    throw new Error("Temporarily unavailable");
+                const id = req.query;
+                const object = this._schema.context.objects.find(object => (object.id === id.objectID));
+                const result = await transaction.query(object.makeQuery([{
+                        key: object.keys.find(key => key.id === id.keyID),
+                        alias: "binaryField"
+                    }], {
+                    where: {
+                        [Schema_1.IntegratedFilterTypes.AND]: id.primaryFields.map(field => ({
+                            [Schema_1.FilterTypes.EQUALS]: {
+                                [object.findPrimaryKeys().find(key => key.id === field.keyID).name]: field.value
+                            }
+                        }))
+                    }
+                }, "BLOB"));
                 const blobStream = await FBDatabase_1.default.blobToStream(result[0].binaryField); //TODO fix lib
                 blobStream.pipe(res);
                 await new Promise(resolve => blobStream.on("end", resolve));

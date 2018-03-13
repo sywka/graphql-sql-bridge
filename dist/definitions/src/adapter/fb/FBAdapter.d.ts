@@ -1,7 +1,22 @@
-import { GraphQLResolveInfo } from "graphql/type/definition";
-import { Args, FilterTypes, IField, ISchemaAdapter, ITable, Value } from "../../Schema";
+import { GraphQLResolveInfo } from "graphql";
+import { Args, ID, ISchemaAdapter, ISchemaObject, SchemaFieldTypes } from "../../Schema";
 import { DBOptions, FBConnectionPool } from "./FBDatabase";
 export declare type BlobLinkCreator = (id: IBlobID) => string;
+export interface IBase {
+    readonly id: ID;
+    readonly name: string;
+    description: string;
+}
+export interface IField extends IBase {
+    readonly primary: boolean;
+    readonly type: SchemaFieldTypes;
+    readonly nonNull: boolean;
+    readonly tableRefKey: ID;
+    readonly fieldRefKey: ID;
+}
+export interface ITable extends IBase {
+    readonly fields: IField[];
+}
 export interface IFBGraphQLContext {
     query(query: string, params?: any[]): Promise<any[]>;
     execute(query: string, params?: any[]): Promise<any[]>;
@@ -16,10 +31,12 @@ export interface IAdapterOptions extends ISchemaDetailOptions {
     blobLinkCreator: BlobLinkCreator;
 }
 export interface IBlobID {
-    table: string;
-    field: string;
-    primaryField: string;
-    primaryKey: string;
+    objectID: ID;
+    keyID: ID;
+    primaryFields: {
+        keyID: ID;
+        value: any;
+    }[];
 }
 export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
     protected _options: IAdapterOptions;
@@ -27,9 +44,7 @@ export default class FBAdapter implements ISchemaAdapter<IFBGraphQLContext> {
     constructor(dbOptions: DBOptions, options: IAdapterOptions);
     constructor(pool: FBConnectionPool, options: IAdapterOptions);
     readonly source: DBOptions | FBConnectionPool;
-    private static _convertType(type);
-    quote(str: string): string;
-    getTables(): Promise<ITable[]>;
+    protected static _convertType(type: number): SchemaFieldTypes;
+    getObjects(): Promise<ISchemaObject[]>;
     resolve(source: any, args: Args, context: IFBGraphQLContext, info: GraphQLResolveInfo): Promise<any>;
-    createSQLCondition(filterType: FilterTypes, tableAlias: string, field: IField, value?: Value): string;
 }
