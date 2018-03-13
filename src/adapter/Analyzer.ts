@@ -10,7 +10,6 @@ import {
 } from "graphql";
 import {getArgumentValues} from "graphql/execution/values";
 import {Args} from "../Schema";
-import AliasNamespace, {Type} from "./AliasNamespace";
 import SQLObject from "./SQLObject";
 import SQLObjectKey from "./SQLObjectKey";
 
@@ -20,7 +19,6 @@ export type SkipRelayConnectionResult = { parentType: GraphQLOutputType, fieldNo
 
 export interface IQueryField<Object extends SQLObject<SQLObjectKey>, Key extends SQLObjectKey> {
     key: Key;
-    alias: string;
     selectionValue?: string;
     query?: IQuery<Object, Key>;
 }
@@ -28,12 +26,10 @@ export interface IQueryField<Object extends SQLObject<SQLObjectKey>, Key extends
 export interface IQuery<Object extends SQLObject<SQLObjectKey>, Key extends SQLObjectKey> {
     args: Args;
     object: Object;
-    alias: string;
     fields: IQueryField<Object, Key>[];
 }
 
 export interface IContext {
-    namespace: AliasNamespace;
     fragments: Fragments;
     variableValues: Args;
 }
@@ -93,31 +89,16 @@ export default class Analyzer<Object extends SQLObject<SQLObjectKey>, Key extend
         }));
     }
 
-    //TODO multiply primary field
-    public createDefinitions(query: IQuery<Object, Key>): any[] {
-        return [].concat(query.fields.reduce((definitions, field) => {
-            let definition;
-            if (field.query) {
-                definition = this.createDefinitions(field.query);
-            } else {
-                definition = {column: field.alias};
-            }
-            definitions[field.selectionValue ? field.selectionValue : field.key.name] = definition;
-            return definitions;
-        }, {}));
-    }
-
-    public resolveInfo(info: GraphQLResolveInfo, namespace: AliasNamespace): IQuery<Object, Key>[] {
+    public resolveInfo(info: GraphQLResolveInfo): IQuery<Object, Key>[] {
         const parentType = info.parentType;
         const context: IContext = {
-            namespace,
             fragments: info.fragments,
             variableValues: info.variableValues
         };
 
         if (info.fieldNodes.length) {
             return info.fieldNodes.reduce((queries, fieldNode) => {
-                const query = this.analyze(fieldNode, parentType, context, null);
+                const query = this.analyze(fieldNode, parentType, context);
                 if (query) queries.push(query);
                 return queries;
             }, []);
@@ -125,7 +106,7 @@ export default class Analyzer<Object extends SQLObject<SQLObjectKey>, Key extend
         return [];
     }
 
-    private analyze(fieldNode: FieldNode, parentType: GraphQLOutputType, context: IContext, alias: string): IQuery<Object, Key> {
+    private analyze(fieldNode: FieldNode, parentType: GraphQLOutputType, context: IContext): IQuery<Object, Key> {
         parentType = Analyzer.skipNonNullType(parentType);
         parentType = Analyzer.skipListType(parentType);
         let args;
@@ -147,17 +128,11 @@ export default class Analyzer<Object extends SQLObject<SQLObjectKey>, Key extend
 
         if (config && config.object) {
             const object: Object = config.object;
-            const queryAlias = context.namespace.generate(Type.TABLE, object.originalName);
             const query: IQuery<Object, Key> = {
                 args,
                 object: object,
-                alias: queryAlias,
                 fields: []
             };
-
-            if (alias === null) alias = "";
-            else if (alias) alias = `${alias}${queryAlias}__`;
-            else alias = `${queryAlias}__`;
 
             if (parentType instanceof GraphQLObjectType) {
                 const queryFields = fieldNode.selectionSet.selections.reduce((fields, selection: FieldNode) => {
@@ -167,8 +142,7 @@ export default class Analyzer<Object extends SQLObject<SQLObjectKey>, Key extend
                         fields.push({
                             key: fieldKey,
                             selectionValue: selection.name.value,
-                            alias: alias + context.namespace.generate(Type.COLUMN, fieldKey.originalName),
-                            query: this.analyze(selection, parentType, context, alias)
+                            query: this.analyze(selection, parentType, context)
                         });
                     }
                     return fields;
@@ -176,10 +150,7 @@ export default class Analyzer<Object extends SQLObject<SQLObjectKey>, Key extend
 
                 const queryPrimaryFields = (<Key[]>query.object.findPrimaryKeys())
                     .filter(key => !queryFields.find(field => !field.query && field.key === key))
-                    .map(key => ({
-                        key: key,
-                        alias: alias + context.namespace.generate(Type.COLUMN, key.originalName)
-                    }));
+                    .map(key => ({key}));
 
                 query.fields = queryPrimaryFields
                     .concat(queryFields)

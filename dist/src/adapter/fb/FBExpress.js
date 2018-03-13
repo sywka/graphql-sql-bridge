@@ -45,9 +45,9 @@ class FBExpress extends BaseRouter_1.default {
                     throw new Error("Temporarily unavailable");
                 const id = req.query;
                 const object = this._schema.context.objects.find(object => (object.id === id.objectID));
-                const result = await transaction.query(object.makeQuery([{
+                const result = await transaction.query(object.makeSQL([{
                         key: object.keys.find(key => key.id === id.keyID),
-                        alias: "binaryField"
+                        alias: "FIELD"
                     }], {
                     where: {
                         [Schema_1.IntegratedFilterTypes.AND]: id.primaryFields.map(field => ({
@@ -56,8 +56,8 @@ class FBExpress extends BaseRouter_1.default {
                             }
                         }))
                     }
-                }, "BLOB"));
-                const blobStream = await FBDatabase_1.default.blobToStream(result[0].binaryField); //TODO fix lib
+                }, "BLOB_ALIAS"));
+                const blobStream = await FBDatabase_1.default.blobToStream(result[0].FIELD); //TODO fix lib
                 blobStream.pipe(res);
                 await new Promise(resolve => blobStream.on("end", resolve));
             });

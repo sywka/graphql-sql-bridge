@@ -61,9 +61,13 @@ class Schema {
     }
     static _escapeObjects(objects) {
         return objects.forEach(object => {
-            object.name = Schema._escapeOriginalName(objects, object.originalName);
+            if (!object.name) {
+                object.name = Schema._escapeOriginalName(objects, object.originalName);
+            }
             object.keys.forEach(key => {
-                key.name = Schema._escapeOriginalName(object.keys, key.originalName);
+                if (!key.name) {
+                    key.name = Schema._escapeOriginalName(object.keys, key.originalName);
+                }
             });
         });
     }

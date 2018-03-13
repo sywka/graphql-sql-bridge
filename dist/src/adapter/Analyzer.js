@@ -2,7 +2,6 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const graphql_1 = require("graphql");
 const values_1 = require("graphql/execution/values");
-const AliasNamespace_1 = require("./AliasNamespace");
 class Analyzer {
     static skipListType(type) {
         if (type instanceof graphql_1.GraphQLList) {
@@ -50,30 +49,15 @@ class Analyzer {
             }
         }));
     }
-    //TODO multiply primary field
-    createDefinitions(query) {
-        return [].concat(query.fields.reduce((definitions, field) => {
-            let definition;
-            if (field.query) {
-                definition = this.createDefinitions(field.query);
-            }
-            else {
-                definition = { column: field.alias };
-            }
-            definitions[field.selectionValue ? field.selectionValue : field.key.name] = definition;
-            return definitions;
-        }, {}));
-    }
-    resolveInfo(info, namespace) {
+    resolveInfo(info) {
         const parentType = info.parentType;
         const context = {
-            namespace,
             fragments: info.fragments,
             variableValues: info.variableValues
         };
         if (info.fieldNodes.length) {
             return info.fieldNodes.reduce((queries, fieldNode) => {
-                const query = this.analyze(fieldNode, parentType, context, null);
+                const query = this.analyze(fieldNode, parentType, context);
                 if (query)
                     queries.push(query);
                 return queries;
@@ -81,7 +65,7 @@ class Analyzer {
         }
         return [];
     }
-    analyze(fieldNode, parentType, context, alias) {
+    analyze(fieldNode, parentType, context) {
         parentType = Analyzer.skipNonNullType(parentType);
         parentType = Analyzer.skipListType(parentType);
         let args;
@@ -97,19 +81,11 @@ class Analyzer {
         const config = parentType._typeConfig;
         if (config && config.object) {
             const object = config.object;
-            const queryAlias = context.namespace.generate(AliasNamespace_1.Type.TABLE, object.originalName);
             const query = {
                 args,
                 object: object,
-                alias: queryAlias,
                 fields: []
             };
-            if (alias === null)
-                alias = "";
-            else if (alias)
-                alias = `${alias}${queryAlias}__`;
-            else
-                alias = `${queryAlias}__`;
             if (parentType instanceof graphql_1.GraphQLObjectType) {
                 const queryFields = fieldNode.selectionSet.selections.reduce((fields, selection) => {
                     const field = parentType.getFields()[selection.name.value];
@@ -118,18 +94,14 @@ class Analyzer {
                         fields.push({
                             key: fieldKey,
                             selectionValue: selection.name.value,
-                            alias: alias + context.namespace.generate(AliasNamespace_1.Type.COLUMN, fieldKey.originalName),
-                            query: this.analyze(selection, parentType, context, alias)
+                            query: this.analyze(selection, parentType, context)
                         });
                     }
                     return fields;
                 }, []);
                 const queryPrimaryFields = query.object.findPrimaryKeys()
                     .filter(key => !queryFields.find(field => !field.query && field.key === key))
-                    .map(key => ({
-                    key: key,
-                    alias: alias + context.namespace.generate(AliasNamespace_1.Type.COLUMN, key.originalName)
-                }));
+                    .map(key => ({ key }));
                 query.fields = queryPrimaryFields
                     .concat(queryFields)
                     .sort((a, b) => {

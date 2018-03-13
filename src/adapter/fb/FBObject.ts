@@ -6,7 +6,7 @@ import {FilterTypes, SchemaFieldTypes} from "../../Schema";
 export default class FBObject<Key extends SQLObjectKey> extends SQLObject<Key> {
 
     public _quote(str: string): string {
-        return `"${str}"`;
+        return `${str}`;
     }
 
     protected _createSQLCondition(filterType: FilterTypes, key: Key, alias: string, value?: any) {

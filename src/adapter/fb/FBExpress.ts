@@ -68,9 +68,10 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
                 const object = <FBObject<SQLObjectKey>>this._schema.context.objects.find(object => (
                     object.id === id.objectID
                 ));
-                const result = await transaction.query(object.makeQuery([{
+
+                const result = await transaction.query(object.makeSQL([{
                     key: object.keys.find(key => key.id === id.keyID),
-                    alias: "binaryField"
+                    alias: "FIELD"
                 }], {
                     where: {
                         [IntegratedFilterTypes.AND]: id.primaryFields.map(field => ({
@@ -79,9 +80,9 @@ export default class FBExpress extends BaseRouter<FBExpressOptions> {
                             }
                         }))
                     }
-                }, "BLOB"));
+                }, "BLOB_ALIAS"));
 
-                const blobStream = await FBDatabase.blobToStream(result[0].binaryField);    //TODO fix lib
+                const blobStream = await FBDatabase.blobToStream(result[0].FIELD);    //TODO fix lib
                 blobStream.pipe(res);
                 await new Promise(resolve => blobStream.on("end", resolve));
             });

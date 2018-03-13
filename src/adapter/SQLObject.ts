@@ -1,9 +1,34 @@
 import SchemaObject from "../objects/SchemaObject";
 import {Args, FilterTypes, IntegratedFilterTypes, SortType} from "../Schema";
-import {IQueryField} from "./Analyzer";
+import {IQuery} from "./Analyzer";
 import SQLObjectKey from "./SQLObjectKey";
+import AliasNamespace, {Type} from "./AliasNamespace";
 
-export default abstract class SQLObject<T extends SQLObjectKey> extends SchemaObject<T> {
+export type Query = { sql: string, definitions: any };
+
+export interface IQueryFieldAliases<Object extends SQLObject<SQLObjectKey>, Key extends SQLObjectKey> {
+    key: Key;
+    alias: string;
+    selectionValue?: string;
+    query?: IQueryAliases<Object, Key>;
+}
+
+export interface IQueryAliases<Object extends SQLObject<SQLObjectKey>, Key extends SQLObjectKey> {
+    args: Args;
+    object: Object;
+    alias: string;
+    fields: IQueryFieldAliases<Object, Key>[];
+}
+
+export default abstract class SQLObject<Key extends SQLObjectKey> extends SchemaObject<Key> {
+
+    public static createQuery<Key extends SQLObjectKey>(query: IQuery<SQLObject<Key>, Key>, namespace: AliasNamespace): Query {
+        const queryAliases = query.object.prepareQuery(query, namespace);
+        return {
+            sql: queryAliases.object.makeSQL(queryAliases.fields, queryAliases.args, queryAliases.alias),
+            definitions: queryAliases.object.makeDefinitions(queryAliases)
+        };
+    }
 
     protected static _joinConditions(array: any[], separator: string): string {
         if (!array.length) return "";
@@ -11,11 +36,19 @@ export default abstract class SQLObject<T extends SQLObjectKey> extends SchemaOb
         return array.join(separator);
     }
 
-    public findPrimaryKeys(): T[] {
+    public findPrimaryKeys(): Key[] {
         return this.keys.filter(key => key.primary);
     }
 
-    public makeQuery(fields: IQueryField<SQLObject<T>, T>[], args: Args, alias: string): string {
+    public makeDefinitions(query: IQueryAliases<SQLObject<Key>, Key>): any[] {
+        return this._createDefinitions(query);
+    }
+
+    public prepareQuery(query: IQuery<SQLObject<Key>, Key>, namespace: AliasNamespace): IQueryAliases<SQLObject<Key>, Key> {
+        return this._createQueryAliases(query, namespace);
+    }
+
+    public makeSQL(fields: IQueryFieldAliases<SQLObject<Key>, Key>[], args: Args, alias: string): string {
         let sql = "";
 
         sql += `SELECT\n${this.makeFields(fields, alias).join(",\n")}`;
@@ -39,11 +72,7 @@ export default abstract class SQLObject<T extends SQLObjectKey> extends SchemaOb
         return sql;
     }
 
-    protected abstract _quote(str: string): string;
-
-    protected abstract _createSQLCondition(filterType: FilterTypes, key: T, alias: string, value?: any);
-
-    protected makeFields(fields: IQueryField<SQLObject<T>, T>[], alias: string): string[] {
+    public makeFields(fields: IQueryFieldAliases<SQLObject<Key>, Key>[], alias: string): string[] {
         const selectFields = fields
             .filter(field => !field.query)
             .map(field => `  ${field.key.makeField(alias, field.alias, this._quote)}`);
@@ -55,16 +84,16 @@ export default abstract class SQLObject<T extends SQLObjectKey> extends SchemaOb
         return selectFields.concat(joinedSelectFields);
     }
 
-    protected makeFrom(fields: IQueryField<SQLObject<T>, T>[], alias: string): string {
+    public makeFrom(fields: IQueryFieldAliases<SQLObject<Key>, Key>[], alias: string): string {
         return `${this.originalName} ${this._quote(alias)}`;
     }
 
-    protected makeJoin(fields: IQueryField<SQLObject<T>, T>[], alias: string): string[] {
+    public makeJoin(fields: IQueryFieldAliases<SQLObject<Key>, Key>[], alias: string): string[] {
         const joins = fields
             .filter(field => field.query)
             .map(({query, key}) => {
                 const keyRef = query.object._findKeyRef(key);
-                return `LEFT JOIN ${query.object.originalName} AS ${this._quote(query.alias)} ` +
+                return `LEFT JOIN ${query.object.makeFrom(query.fields, query.alias)} ` +
                     `ON ${this._quote(query.alias)}.${this._quote(keyRef.originalName)} ` +
                     `= ${this._quote(alias)}.${this._quote(key.originalName)}`;
             });
@@ -75,19 +104,22 @@ export default abstract class SQLObject<T extends SQLObjectKey> extends SchemaOb
         return joins.concat(nestedJoins);
     }
 
-    protected makeWhere(fields: IQueryField<SQLObject<T>, T>[], args: Args, alias: string): string {
+    public makeWhere(fields: IQueryFieldAliases<SQLObject<Key>, Key>[], args: Args, alias: string): string {
         let where = this._createSQLWhere(alias, args.where);
 
         const nestedWhere = fields
             .filter(field => field.query)
             .map(({query}) => query.object.makeWhere(query.fields, query.args, query.alias))
+            .filter(where => where)
             .join(" AND ");
 
-        if (nestedWhere) where += ` AND ${nestedWhere}`;
+        if (where && nestedWhere) where += ` AND ${nestedWhere}`;
+        else if (!where && nestedWhere) where += nestedWhere;
+        
         return where;
     }
 
-    protected makeOrder(fields: IQueryField<SQLObject<T>, T>[], args: Args, alias: string): string {
+    public makeOrder(fields: IQueryFieldAliases<SQLObject<Key>, Key>[], args: Args, alias: string): string {
         if (!args.order) return "";
 
         const order = args.order.map(item => (
@@ -106,6 +138,35 @@ export default abstract class SQLObject<T extends SQLObjectKey> extends SchemaOb
             .filter(order => order);
 
         return order.concat(nestedOrder).join(", ");
+    }
+
+    protected abstract _quote(str: string): string;
+
+    protected abstract _createSQLCondition(filterType: FilterTypes, key: Key, alias: string, value?: any);
+
+    protected _createDefinitions(query: IQueryAliases<SQLObject<Key>, Key>): any[] {
+        return [].concat(query.fields.reduce((definitions, field) => {
+            let definition;
+            if (field.query) {
+                definition = this._createDefinitions(field.query);
+            } else {
+                definition = {column: field.alias};
+            }
+            definitions[field.selectionValue ? field.selectionValue : field.key.name] = definition;
+            return definitions;
+        }, {}));
+    }
+
+    protected _createQueryAliases(query: IQuery<SQLObject<Key>, Key>, namespace: AliasNamespace): IQueryAliases<SQLObject<Key>, Key> {
+        const queryAliases = <IQueryAliases<SQLObject<Key>, Key>>query;
+        queryAliases.alias = namespace.generate(Type.TABLE, query.object.name);
+        queryAliases.fields.forEach(field => {
+            field.alias = namespace.generate(Type.COLUMN,
+                field.selectionValue ? field.selectionValue : field.key.name);
+            field.alias = queryAliases.alias + "_" + field.alias;
+            if (field.query) this._createQueryAliases(field.query, namespace);
+        });
+        return queryAliases;
     }
 
     protected _createSQLWhere(alias: string, where): string {

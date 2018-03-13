@@ -8,7 +8,7 @@ const FBDatabase_1 = __importDefault(require("./FBDatabase"));
 const Schema_1 = require("../../Schema");
 class FBObject extends SQLObject_1.default {
     _quote(str) {
-        return `"${str}"`;
+        return `${str}`;
     }
     _createSQLCondition(filterType, key, alias, value) {
         let tableField = `${this._quote(alias)}.${this._quote(key.originalName)}`;

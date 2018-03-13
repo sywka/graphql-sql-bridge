@@ -5,7 +5,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 const SchemaObject_1 = __importDefault(require("../objects/SchemaObject"));
 const Schema_1 = require("../Schema");
+const AliasNamespace_1 = require("./AliasNamespace");
 class SQLObject extends SchemaObject_1.default {
+    static createQuery(query, namespace) {
+        const queryAliases = query.object.prepareQuery(query, namespace);
+        return {
+            sql: queryAliases.object.makeSQL(queryAliases.fields, queryAliases.args, queryAliases.alias),
+            definitions: queryAliases.object.makeDefinitions(queryAliases)
+        };
+    }
     static _joinConditions(array, separator) {
         if (!array.length)
             return "";
@@ -16,7 +24,13 @@ class SQLObject extends SchemaObject_1.default {
     findPrimaryKeys() {
         return this.keys.filter(key => key.primary);
     }
-    makeQuery(fields, args, alias) {
+    makeDefinitions(query) {
+        return this._createDefinitions(query);
+    }
+    prepareQuery(query, namespace) {
+        return this._createQueryAliases(query, namespace);
+    }
+    makeSQL(fields, args, alias) {
         let sql = "";
         sql += `SELECT\n${this.makeFields(fields, alias).join(",\n")}`;
         sql += `\nFROM ${this.makeFrom(fields, alias)}`;
@@ -51,7 +65,7 @@ class SQLObject extends SchemaObject_1.default {
             .filter(field => field.query)
             .map(({ query, key }) => {
             const keyRef = query.object._findKeyRef(key);
-            return `LEFT JOIN ${query.object.originalName} AS ${this._quote(query.alias)} ` +
+            return `LEFT JOIN ${query.object.makeFrom(query.fields, query.alias)} ` +
                 `ON ${this._quote(query.alias)}.${this._quote(keyRef.originalName)} ` +
                 `= ${this._quote(alias)}.${this._quote(key.originalName)}`;
         });
@@ -64,9 +78,12 @@ class SQLObject extends SchemaObject_1.default {
         const nestedWhere = fields
             .filter(field => field.query)
             .map(({ query }) => query.object.makeWhere(query.fields, query.args, query.alias))
+            .filter(where => where)
             .join(" AND ");
-        if (nestedWhere)
+        if (where && nestedWhere)
             where += ` AND ${nestedWhere}`;
+        else if (!where && nestedWhere)
+            where += nestedWhere;
         return where;
     }
     makeOrder(fields, args, alias) {
@@ -82,6 +99,30 @@ class SQLObject extends SchemaObject_1.default {
             .map(({ query }) => query.object.makeOrder(query.fields, query.args, query.alias))
             .filter(order => order);
         return order.concat(nestedOrder).join(", ");
+    }
+    _createDefinitions(query) {
+        return [].concat(query.fields.reduce((definitions, field) => {
+            let definition;
+            if (field.query) {
+                definition = this._createDefinitions(field.query);
+            }
+            else {
+                definition = { column: field.alias };
+            }
+            definitions[field.selectionValue ? field.selectionValue : field.key.name] = definition;
+            return definitions;
+        }, {}));
+    }
+    _createQueryAliases(query, namespace) {
+        const queryAliases = query;
+        queryAliases.alias = namespace.generate(AliasNamespace_1.Type.TABLE, query.object.name);
+        queryAliases.fields.forEach(field => {
+            field.alias = namespace.generate(AliasNamespace_1.Type.COLUMN, field.selectionValue ? field.selectionValue : field.key.name);
+            field.alias = queryAliases.alias + "_" + field.alias;
+            if (field.query)
+                this._createQueryAliases(field.query, namespace);
+        });
+        return queryAliases;
     }
     _createSQLWhere(alias, where) {
         if (!where)
